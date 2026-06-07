@@ -1,0 +1,60 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+*.ipr
+*.iws
+.idea/
+pubspec.lock
+
+# Flutter iOS
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Runner.xcworkspace/
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/app.flx
+app/ios/Flutter/app.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+dist/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+
+# uv
+.uv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# Secrets
+*.pem
+*.key
+service-account*.json
