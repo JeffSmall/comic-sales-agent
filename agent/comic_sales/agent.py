@@ -78,14 +78,19 @@ for book in WATCHLIST:
         f"| Last sale: ${book['last_sale']:,} | Recent: {prices_str} | {book['notes']}\n"
     )
 
-INSTRUCTION = _system_prompt + _watchlist_block
+_INSTRUCTION = _system_prompt + _watchlist_block
+
+# ADK template-substitutes any {…} tokens in a plain string instruction,
+# which breaks A2UI's embedded JSON schema. Using a callable bypasses that.
+def instruction(_context) -> str:
+    return _INSTRUCTION
 
 # ---------------------------------------------------------------------------
 # Root agent
 # ---------------------------------------------------------------------------
 root_agent = Agent(
     name="comic_sales_agent",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     description="Comic book sales tracking agent — emits A2UI catalog payloads.",
-    instruction=INSTRUCTION,
+    instruction=instruction,
 )
