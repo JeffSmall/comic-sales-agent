@@ -187,8 +187,21 @@ right-aligned numerics, high density (sparklines, small multiples, dense matrice
 
 - **Phase 3 — Price history, visualization catalog, and scraper.** 🔜 Deferred.
   - **This is where the trend/grade analysis feature lives.**
-  - Scraper writes individual sale events to `sales/{saleId}` per comic **per grade** (not a flat
-    array — see §9). Source: eBay completed listings.
+
+  - **Spike C — Historical backfill (do this first, before building any visualization):**
+    - One-time Python script (`tools/backfill_sales.py`) that scrapes ~6 months of completed
+      sale data from eBay (and any other target platforms) for every book in the watchlist.
+    - Writes each sale as a `sales/{saleId}` document with `grade`, `price`, `sale_date`,
+      `source`, `url` (see §9 schema).
+    - Run once locally before starting visualization work. This gives the catalog items real
+      data to render against from day one instead of waiting weeks for the live scraper.
+    - Gate: Firestore contains ≥6 months of grade-level sales for at least 3 watchlist books.
+    - **Why a spike:** scraping eBay completed listings reliably enough to get clean
+      grade/price pairs is non-trivial (parsing titles, deduplication, handling variants).
+      De-risk it in isolation before the visualization work depends on it.
+
+  - Ongoing scraper writes new sale events to `sales/{saleId}` per comic **per grade** (not a
+    flat array — see §9). Source: eBay completed listings + any additional platforms.
   - Agent gains a `get_price_history(bookId, days, grade?)` tool querying the sales subcollection.
   - Agent surfaces trend analysis: e.g. "Higher graded copies are in less demand than lower graded
     copies right now" — backed by grade-level sales data.
