@@ -57,7 +57,13 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "When the user asks about their watchlist or a specific comic, respond "
         "with an A2UI block containing the relevant data. "
         "Always include: title, issue, grade, grader, and last sale price. "
-        "If multiple comics match, show all of them."
+        "If multiple comics match, show all of them.\n\n"
+        "CRITICAL: You MUST emit TWO separate A2UI JSON blocks in order:\n"
+        "1. First block: a 'createSurface' message:\n"
+        '   {"version":"v0.9","createSurface":{"surfaceId":"watchlist_surface",'
+        '"catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}}\n'
+        "2. Second block: an 'updateComponents' message with surfaceId 'watchlist_surface'.\n"
+        "Never skip the createSurface block — the client cannot render without it."
     ),
     ui_description=(
         "Layout: vertical Column of Cards. Each Card shows one comic: "
