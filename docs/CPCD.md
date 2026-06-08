@@ -5,8 +5,8 @@
 > else in the Claude Project hangs off it. When a decision changes, update the relevant
 > section and the ADR log — don't bury the change in a chat.
 
-**Status:** Phase 1 — Spike A (ADK agent)
-**Last updated:** 2026-06-07
+**Status:** Phase 1 COMPLETE — Phase 2 next
+**Last updated:** 2026-06-08
 **Primary machine:** Personal MacBook Air M4 (direct Anthropic connection — avoids the Portkey beta-flag issue)
 
 ---
@@ -171,15 +171,39 @@ right-aligned numerics, high density (sparklines, small multiples, dense matrice
 
 ## 8. Phase plan
 
-- **Phase 0 — Scaffold + this CPCD.** Repo, Project knowledge, version pins recorded.
-- **Phase 1 — Two de-risking spikes:**
-  - *Spike A (ADK goal):* local ADK agent emits A2UI for one hardcoded comic; verify in `adk web`.
-  - *Spike B (GenUI goal):* bare Flutter app (`genui` + `genui_a2a`) renders that one card from Spike A on the iOS simulator.
-  - **Gate:** both green → architecture confirmed.
-- **Phase 2 — Real data.** Point the agent at Firestore; query a real watchlist book; build the starter catalog (§6).
-- **Phase 3 — Deploy.** `adk deploy agent_engine`; point the app at the deployed agent; confirm round trip in the cloud.
-- **Phase 4 — Polish (still v1).** Catalog fidelity pass against the Tufte doctrine; basic conversation flows.
-- **v2+ (out of scope here):** push/detection subsystem, Apple Watch, auth.
+- **Phase 0 — Scaffold + this CPCD.** ✅ COMPLETE.
+
+- **Phase 1 — Two de-risking spikes.** ✅ COMPLETE — tagged `phase1-complete`.
+  - *Spike A:* local ADK agent emits A2UI for hardcoded watchlist; verified end-to-end.
+  - *Spike B:* Flutter app renders A2UI as native Card/Row/Text widgets on iOS simulator.
+  - Key discovery: agent already handles conversational add/edit intent at the LLM layer.
+
+- **Phase 2 — Persistent watchlist + conversational mutations.** 🔜 Next.
+  - Firestore read tool: agent fetches the user's watchlist from `watchlist/{bookId}` at query time.
+  - Firestore write tool: agent creates/updates/removes comics conversationally.
+  - Seed the `sales/{saleId}` subcollection for a few books so Phase 3 has data to display.
+  - Build `WatchlistRow` catalog item (data-driven; basic card already proven in Phase 1).
+  - Single hardcoded user ID; no auth yet.
+
+- **Phase 3 — Price history, visualization catalog, and scraper.** 🔜 Deferred.
+  - **This is where the trend/grade analysis feature lives.**
+  - Scraper writes individual sale events to `sales/{saleId}` per comic **per grade** (not a flat
+    array — see §9). Source: eBay completed listings.
+  - Agent gains a `get_price_history(bookId, days, grade?)` tool querying the sales subcollection.
+  - Agent surfaces trend analysis: e.g. "Higher graded copies are in less demand than lower graded
+    copies right now" — backed by grade-level sales data.
+  - 30/60/90-day price views, grade variance charts, anomaly highlighting.
+  - Build visualization catalog items: `Sparkline`, `GradeTierMatrix`, `SmallMultiplesGrid` (§6).
+
+- **Phase 4 — Deploy + production path.** 🔜 Deferred.
+  - `adk deploy agent_engine`; point app at deployed agent.
+  - Cloud Scheduler → Cloud Run scraper job (replaces local scraper).
+  - Basic auth (single user for now).
+
+- **Phase 5 — Push + v2 features.** 🔜 Deferred.
+  - Push/notification subsystem (price alerts via APNs/FCM).
+  - Apple Watch glance.
+  - Multi-user.
 
 ---
 
@@ -194,17 +218,28 @@ watchlist/{bookId}
   publisher: string
   raw_or_graded: "raw" | "graded"
   grader: "CGC" | "CBCS" | null
-  grade: number | null          // e.g. 9.8
+  grade: number | null          // the copy YOU own, e.g. 9.8
   notes: string
+  // DO NOT store recent_prices as a flat array here — that loses grade
+  // and date information. All price history lives in the sales subcollection.
 
 watchlist/{bookId}/sales/{saleId}
   price: number
   sale_date: timestamp
-  source: "ebay"
-  url: string
+  source: "ebay" | "manual"
+  url: string | null
   raw_or_graded: "raw" | "graded"
-  grade: number | null
+  grade: number | null          // the grade of THIS sale, not the owned copy
+                                // CRITICAL: must be per-sale for grade-level trend
+                                // analysis (GradeTierMatrix, variance by grade,
+                                // "9.8s softening vs 9.4s strengthening" insights)
 ```
+
+**Why per-sale grade matters:** the Phase 3 visualization features (grade variance charts,
+"higher grades in less demand" trend detection) require querying sales filtered by grade
+across a date range. A flat `recent_prices` array on the watchlist document cannot support
+this — it collapses grade information. The scraper must write each completed sale as its own
+document with `grade` populated.
 
 ---
 
@@ -217,12 +252,20 @@ watchlist/{bookId}/sales/{saleId}
 ---
 
 ## 11. Open questions / risks
-- [ ] Exact current versions of `genui`, `genui_a2a`, `a2a`, A2UI, ADK (pin at scaffold).
-- [ ] Current Gemini model id on Vertex at build time.
+- [x] Exact current versions: `genui 0.9.2`, `genui_a2a 0.9.0`, `a2a 4.2.0`, `google-adk 2.2.0`.
+- [x] Gemini model: `gemini-2.5-flash` (`gemini-2.0-flash` deprecated — returns 404).
 - [ ] Supported Agent Engine region (verify `us-central1`).
 - [ ] GCP project id / staging bucket (TODO).
-- [ ] Real watchlist schema reconciliation (§9).
-- [ ] GenUI alpha breakage: how often, mitigated by the §6/ADR-006 adapter boundary.
+- [ ] Real watchlist schema reconciliation (§9) — seed data needed for Phase 2.
+- [ ] GenUI alpha breakage: `genui_a2a 0.9.0` has two known bugs (patched — see CLAUDE.md).
+- [ ] Phase 3 visualization: which price data source for the scraper? eBay completed listings
+      confirmed as the source. Need to decide on scraping approach (direct or via an API).
+- [ ] Phase 3 visualization: what time window is "enough" data to show meaningful trends?
+      30/60/90 days requires the scraper to have been running long enough. Consider seeding
+      historical data from the existing Python tracker for initial Phase 3 testing.
+- [ ] `GradeTierMatrix` and `SmallMultiplesGrid` are custom catalog items — they require
+      building custom Flutter widgets and registering them with the GenUI catalog. This is
+      Phase 3 work and is the first time we go beyond `BasicCatalog`.
 
 ---
 
