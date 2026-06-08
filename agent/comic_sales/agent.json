@@ -1,0 +1,29 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text",
+    "data"
+  ],
+  "description": "Comic book sales tracking agent — emits A2UI catalog payloads.",
+  "name": "comic_sales_agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Show and analyze the comic watchlist.",
+      "id": "watchlist",
+      "name": "Watchlist",
+      "tags": [
+        "comics",
+        "watchlist"
+      ]
+    }
+  ],
+  "url": "http://127.0.0.1:8001/a2a/comic_sales",
+  "version": "0.1.0"
+}
