@@ -5,9 +5,13 @@
 /// not raw JSON.
 library;
 
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:genui_a2a/genui_a2a.dart';
+import 'package:logging/logging.dart';
 
 // The ADK `adk web` server; override with --dart-define=AGENT_URL=...
 const String _agentBaseUrl = String.fromEnvironment(
@@ -16,6 +20,14 @@ const String _agentBaseUrl = String.fromEnvironment(
 );
 
 void main() {
+  // Enable GenUI verbose logging so we can see A2UI parse/surface events
+  Logger.root.level = Level.ALL;
+  Logger.root.onRecord.listen((r) {
+    if (kDebugMode) {
+      debugPrint('[${r.loggerName}] ${r.level.name}: ${r.message}');
+      if (r.error != null) debugPrint('  error: ${r.error}');
+    }
+  });
   runApp(const ComicSalesApp());
 }
 
@@ -52,6 +64,10 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _textCtrl = TextEditingController();
   bool _sending = false;
 
+  // Accumulates raw text from textStream so we can extract A2UI blocks after
+  // the full response arrives (fallback for streaming-parser timing issues).
+  final StringBuffer _responseBuffer = StringBuffer();
+
   @override
   void initState() {
     super.initState();
@@ -77,12 +93,86 @@ class _ChatPageState extends State<ChatPage> {
     );
 
     // 5. Pipe connector output into the transport adapter
-    _connector.stream.listen(_transport.addMessage);
-    _connector.textStream.listen(_transport.addChunk);
+    _connector.stream.listen((msg) {
+      debugPrint('[A2UI] message received: $msg');
+      _transport.addMessage(msg);
+    }, onError: (e) => debugPrint('[A2UI] stream error: $e'));
+    _connector.textStream.listen((chunk) {
+      debugPrint(
+        '[A2UI] text chunk: ${chunk.substring(0, chunk.length.clamp(0, 120))}',
+      );
+      _transport.addChunk(chunk);
+      _responseBuffer.write(chunk); // accumulate for fallback parser
+    }, onError: (e) => debugPrint('[A2UI] textStream error: $e'));
+    _connector.errorStream.listen(
+      (e) => debugPrint('[A2UI] connector error: $e'),
+    );
+    _conversation.events.listen((event) {
+      if (event is ConversationError) {
+        debugPrint('[Conversation] ERROR: ${event.error}');
+        debugPrint('[Conversation] STACK: ${event.stackTrace}');
+      } else if (event is ConversationSurfaceAdded) {
+        debugPrint('[Conversation] SurfaceAdded: ${event.surfaceId}');
+      } else if (event is ConversationComponentsUpdated) {
+        debugPrint('[Conversation] ComponentsUpdated: ${event.surfaceId}');
+      } else {
+        debugPrint('[Conversation] event: ${event.runtimeType}');
+      }
+    });
   }
 
   Future<void> _sendToAgent(ChatMessage message) async {
-    await _connector.connectAndSend(message);
+    _responseBuffer.clear();
+    try {
+      await _connector.connectAndSend(message);
+    } catch (e, st) {
+      debugPrint('[sendToAgent] EXCEPTION: $e');
+      debugPrint('[sendToAgent] STACK: $st');
+      rethrow;
+    }
+    // Fallback: the streaming A2uiParserTransformer may silently drop JSON due
+    // to Map<String,dynamic> vs Map<String,Object?> type-check differences at
+    // runtime. After the full response arrives, parse <a2ui-json> blocks
+    // manually and inject them directly into the transport.
+    _injectA2uiFromBuffer(_responseBuffer.toString());
+  }
+
+  // Regex-extracts every <a2ui-json>…</a2ui-json> block from [text], decodes
+  // each as an A2uiMessage, and injects it via addMessage.
+  void _injectA2uiFromBuffer(String text) {
+    final regex = RegExp(r'<a2ui-json>([\s\S]*?)</a2ui-json>', multiLine: true);
+    var found = 0;
+    for (final match in regex.allMatches(text)) {
+      final jsonStr = match.group(1)?.trim();
+      if (jsonStr == null || jsonStr.isEmpty) continue;
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is! Map) {
+          debugPrint('[A2UI fallback] decoded JSON is not a Map: $decoded');
+          continue;
+        }
+        final jsonMap = Map<String, Object?>.from(decoded as Map);
+        debugPrint(
+          '[A2UI fallback] injecting block ${found + 1}: '
+          '${jsonMap.keys.toList()}',
+        );
+        final msg = A2uiMessage.fromJson(jsonMap);
+        _transport.addMessage(msg);
+        found++;
+      } catch (e, st) {
+        debugPrint('[A2UI fallback] parse error: $e\n$st');
+      }
+    }
+    if (found == 0) {
+      // No <a2ui-json> tags — agent may have used raw JSON without tags.
+      // Log first 500 chars of the buffer to help diagnose.
+      debugPrint(
+        '[A2UI fallback] no <a2ui-json> blocks found. '
+        'Buffer (first 500): ${text.substring(0, text.length.clamp(0, 500))}',
+      );
+    } else {
+      debugPrint('[A2UI fallback] injected $found A2UI message(s).');
+    }
   }
 
   @override
