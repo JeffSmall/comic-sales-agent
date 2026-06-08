@@ -1,57 +1,147 @@
 # app/ — Flutter iOS App
 
-## What lives here
+## Current state (Phase 1 complete)
 
-A Flutter iOS-only app that receives A2UI catalog payloads from the agent and renders them
-as Material 3 UI components, following the **Tufte infographic doctrine** (see
-`../docs/tufte-infographics.md`).
+The app is fully working. Spike B gate passed: typing "show me my watchlist" renders
+two Material 3 Card widgets (Amazing Fantasy #15 and Incredible Hulk #1) with grade and
+price data, driven entirely by A2UI JSON from the local ADK agent.
 
 ## Structure
 
 ```
 app/
-├─ CLAUDE.md      ← you are here
-└─ lib/           # Flutter source (to be scaffolded with `flutter create`)
+├─ CLAUDE.md          ← you are here
+├─ lib/
+│  └─ main.dart       # Entire app (single file for Phase 1)
+├─ pubspec.yaml
+└─ ios/               # iOS target (only platform configured)
 ```
 
-## Platform target
+## How to run
 
-- **iOS only.** Do not add Android, web, or desktop targets.
+```bash
+cd app
+flutter run
+# or with explicit agent URL:
+flutter run --dart-define=AGENT_URL=http://127.0.0.1:8001
+```
+
+The agent must be running first. See `agent/CLAUDE.md`.
+
+## Platform
+
+- iOS only. No Android, web, or desktop targets.
 - Minimum iOS: 17.0
-- Dart SDK: 3.x (null-safe)
+- Dart SDK: ^3.12.1
 
-## Tech stack
+## Dependencies (pinned — do not upgrade without testing)
 
-- **Framework**: Flutter (latest stable)
-- **UI system**: Material 3 (`useMaterial3: true` — never override to M2)
-- **State management**: TBD via ADR (Riverpod preferred)
-- **Networking**: `dio` or `http` for agent communication
-
-## Tufte doctrine (catalog rendering)
-
-All data-heavy UI (comic listings, price charts, inventory grids) must follow the Tufte
-principles documented in `../docs/tufte-infographics.md`:
-- Maximize data-ink ratio — remove chartjunk
-- Use small multiples over carousels
-- Labels on data, not in legends
-- No gratuitous animation; motion must encode information
-
-## GenUI adapter boundary
-
-The **GenUI adapter** is the single entry point between catalog payloads and Flutter widgets:
-
-```
-Agent A2UI payload → GenUI adapter → Flutter widget tree
+```yaml
+genui: 0.9.2
+genui_a2a: 0.9.0
+a2a: 4.2.0
+logging: any
 ```
 
-- The adapter lives in `lib/gen_ui/` (to be created)
-- It maps catalog widget types to Flutter widget constructors
-- **Nothing outside `lib/gen_ui/` should parse raw catalog JSON**
-- The adapter is the only place allowed to contain `switch` statements on widget type strings
+## Architecture
 
-## Dev conventions
+### Wiring (initState order)
 
-- Feature folders under `lib/features/`
-- Shared widgets under `lib/widgets/`
-- Theme tokens under `lib/theme/`
-- Run: `flutter run --dart-define=AGENT_URL=http://localhost:8080`
+```dart
+_surfaceController = SurfaceController(catalogs: [BasicCatalogItems.asCatalog()]);
+_transport = A2uiTransportAdapter(onSend: _sendToAgent);
+_connector = A2uiAgentConnector(url: Uri.parse('$_agentBaseUrl/a2a/comic_sales'));
+_conversation = Conversation(controller: _surfaceController, transport: _transport);
+```
+
+Then two stream listeners are attached to `_connector`:
+- `_connector.stream` — DataPart A2UI messages (not currently used; agent sends text only)
+- `_connector.textStream` — text chunks from the agent (carries the `<a2ui-json>` payload)
+
+### Data flow
+
+```
+User types query
+  → _conversation.sendRequest()
+  → _transport.sendRequest()
+  → _sendToAgent()
+  → _connector.connectAndSend()   # awaits full SSE stream
+      ↓ (SSE events arrive asynchronously)
+  → textStream fires for each TextPart
+  → _transport.addChunk(chunk)    # for ConversationContentReceived / text display
+  → _responseBuffer.write(chunk)  # accumulated for fallback parser
+      ↓ (after connectAndSend returns)
+  → _injectA2uiFromBuffer()       # THE ACTIVE RENDERING PATH (see below)
+  → _transport.addMessage(msg)    # for each A2UI message
+  → Conversation → SurfaceController.handleMessage()
+  → SurfaceAdded / ComponentsUpdated events
+  → UI rebuilds via ValueListenableBuilder on _conversation.state
+```
+
+### Critical: the rendering fallback
+
+**`addChunk` does NOT reliably trigger rendering.** The `A2uiParserTransformer` inside
+`A2uiTransportAdapter` silently drops parsed JSON because Dart's runtime type check
+`json is Map<String, Object?>` fails for `Map<String, dynamic>` (what `jsonDecode` actually
+returns). This is a bug in `genui 0.9.2`.
+
+The active rendering path is `_injectA2uiFromBuffer()`:
+1. After `connectAndSend` returns, parse the accumulated `_responseBuffer` with a regex
+   for `<a2ui-json>([\s\S]*?)</a2ui-json>` blocks
+2. For each block: `jsonDecode` → `Map<String, Object?>.from(decoded as Map)` → `A2uiMessage.fromJson()` → `_transport.addMessage()`
+3. `addMessage` bypasses the parser and goes directly to `_messageStream`
+
+`addChunk` is still called (for prose text in `ConversationContentReceived`), but it is
+NOT relied upon for widget rendering.
+
+### UI structure
+
+- `ValueListenableBuilder<ConversationState>` on `_conversation.state`
+- When `state.surfaces` is empty: shows "Ask about your watchlist…" placeholder
+- When surfaces exist: `ListView` of `Surface(surfaceContext: ...)` widgets
+- `Surface` is a GenUI widget that renders the A2UI component tree
+
+## Vendor patch required
+
+`~/.pub-cache/hosted/pub.dev/genui_a2a-0.9.0/lib/src/a2a/core/events.g.dart`
+
+In `_$ArtifactUpdateFromJson`, change:
+```dart
+append: json['append'] as bool,
+lastChunk: json['lastChunk'] as bool,
+```
+to:
+```dart
+append: json['append'] as bool? ?? false,
+lastChunk: json['lastChunk'] as bool? ?? false,
+```
+Reason: ADK omits these fields in `artifact-update` events; null cast crashes the app.
+
+This patch is in the global pub cache and survives `flutter clean`, but is lost when the
+pub cache is cleared or on a new machine. Re-apply after `flutter pub cache clean`.
+
+## Logging
+
+Verbose GenUI logging is enabled in `main()`:
+```dart
+Logger.root.level = Level.ALL;
+Logger.root.onRecord.listen((r) {
+  if (kDebugMode) debugPrint('[${r.loggerName}] ${r.level.name}: ${r.message}');
+});
+```
+
+Key log lines to watch:
+- `[A2UI fallback] injecting block N` — fallback parser fired
+- `[GenUI] INFO: SurfaceController.handleMessage received: CreateSurface` — message received
+- `[Conversation] SurfaceAdded: watchlist_surface` — surface created ✅
+- `[Conversation] ComponentsUpdated: watchlist_surface` — components set ✅
+- `[GenUI] INFO: Building widget ...` — widget tree being built ✅
+
+## Phase 2 — What changes (if anything)
+
+The rendering pipeline does not need to change for Phase 2. The agent will return the same
+A2UI structure but with real Firestore data. The app should work without modification.
+
+Possible Phase 2 app changes:
+- Show a loading state while the agent fetches from Firestore (already handled by `isWaiting`)
+- Surface persistence across sessions (currently cleared on app restart)
