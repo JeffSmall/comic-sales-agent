@@ -49,11 +49,12 @@ This monorepo implements a two-sided AI sales agent for comics:
 
 ## Phase status
 
-| Phase | Spikes | Status |
-|-------|--------|--------|
-| Phase 1 — Local proof of concept | Spike A (agent), Spike B (app) | ✅ COMPLETE — tagged `phase1-complete` |
-| Phase 2 — Real data | Firestore watchlist, tool calls | 🔜 Not started |
-| Phase 3 — Production | Cloud Run, auth, push notifications | 🔜 Deferred |
+| Phase | Scope | Status |
+|-------|-------|--------|
+| Phase 1 — Local proof of concept | Spike A (agent emits A2UI), Spike B (Flutter renders A2UI) | ✅ COMPLETE — tagged `phase1-complete` |
+| Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | 🔜 Next |
+| Phase 3 — Live market data | Scheduled price scraper → Firestore; agent surfaces price movement | 🔜 Deferred |
+| Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
 
 ---
 
@@ -197,21 +198,53 @@ The generated code casts `null as bool`, which crashes with
 
 ---
 
-### Phase 2 — What comes next
+### Phase 2 — Persistent watchlist (next)
 
-**Goal:** Replace the hardcoded watchlist in `agent/comic_sales/agent.py` with real data
-from Firestore. The Flutter app and GenUI rendering pipeline do not need to change.
+**Goal:** Replace the hardcoded watchlist with a real Firestore-backed collection that the
+user can read from and write to conversationally through the existing chat UI.
+
+**Discovery from Phase 1:** During Spike B testing, the agent successfully handled "add a
+comic" intent — reasoning about mutations using the hardcoded data and emitting updated A2UI
+— even though no write tool existed. This confirmed that the conversational add/edit/remove
+flow is already working at the LLM reasoning layer; Phase 2 just needs to make it persistent.
 
 **Planned changes:**
-1. Set up a Firestore collection (e.g. `watchlist/{userId}/comics/{comicId}`)
-2. Add a Firestore read tool to the ADK agent (replaces the hardcoded `WATCHLIST` list)
-3. The agent calls the tool at query time; the tool returns the user's real comics
-4. The system prompt stays the same; only the data source changes
 
-**Scope boundary:**
-- v1 (current): local agent, hardcoded data, BasicCatalog, no auth
-- v2 (Phase 2): local agent, Firestore data, BasicCatalog, no auth
-- v3 (deferred): Cloud Run deploy, auth, push notifications, custom catalog
+1. **Firestore schema** — create collection `watchlist/{userId}/comics/{comicId}` with fields:
+   `title`, `issue`, `publisher`, `grade`, `grader`, `recent_prices`, `last_sale`, `notes`
+
+2. **Read tool** — ADK tool that fetches all comics for the current user from Firestore.
+   Replaces the hardcoded `WATCHLIST` list in `agent.py`. Agent calls this at query time.
+
+3. **Write tool** — ADK tool that creates or updates a comic document in Firestore.
+   Agent calls this when the user adds, edits, or removes a comic conversationally.
+
+4. **System prompt update** — instruct the agent to call the read tool before displaying
+   the watchlist, and the write tool before confirming any mutation.
+
+5. **App unchanged** — the Flutter rendering pipeline does not need to change. Whatever
+   A2UI the agent emits (with real data) renders the same way.
+
+**Scope boundary for Phase 2:**
+- Local agent only (no Cloud Run yet)
+- Single hardcoded user ID (no auth yet)
+- BasicCatalog only (no custom catalog yet)
+- No price scraping (prices are user-entered only)
+
+### Phase 3 — Live market data (deferred)
+
+**Goal:** Automatically keep `recent_prices` and `last_sale` current without manual entry.
+
+**Planned changes:**
+1. Scheduled Cloud Function (or ADK tool) that scrapes/calls a price API (e.g. GoCollect,
+   GPAnalysis) for each comic in the user's Firestore watchlist
+2. Writes updated price data back to Firestore on a schedule (daily or weekly)
+3. Agent reads the freshened data via the existing read tool — no agent changes needed
+4. Agent A2UI responses can surface price movement (e.g. "up $1,500 since last week")
+
+### Phase 4 — Production (deferred)
+
+Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2UI catalog.
 
 ---
 
