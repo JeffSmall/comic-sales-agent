@@ -52,7 +52,7 @@ This monorepo implements a two-sided AI sales agent for comics:
 | Phase | Scope | Status |
 |-------|-------|--------|
 | Phase 1 — Local proof of concept | Spike A (agent emits A2UI), Spike B (Flutter renders A2UI) | ✅ COMPLETE — tagged `phase1-complete` |
-| Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | 🔜 Next |
+| Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | 🚧 Agent + Firestore complete and verified; iOS app round-trip verification pending |
 | Phase 3 — Live market data | Scheduled price scraper → Firestore; agent surfaces price movement | 🔜 Deferred |
 | Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
 
@@ -198,38 +198,62 @@ The generated code casts `null as bool`, which crashes with
 
 ---
 
-### Phase 2 — Persistent watchlist (next)
+### Phase 2 — Persistent watchlist (agent built; app verification pending)
 
 **Goal:** Replace the hardcoded watchlist with a real Firestore-backed collection that the
-user can read from and write to conversationally through the existing chat UI.
+user reads from and writes to conversationally through the existing chat UI.
 
-**Discovery from Phase 1:** During Spike B testing, the agent successfully handled "add a
-comic" intent — reasoning about mutations using the hardcoded data and emitting updated A2UI
-— even though no write tool existed. This confirmed that the conversational add/edit/remove
-flow is already working at the LLM reasoning layer; Phase 2 just needs to make it persistent.
+**What was built (and verified against live Firestore):**
 
-**Planned changes:**
+- **GCP project**: `comic-sales-agent` (new, dedicated). Firestore in **Native mode**, location
+  `nam5`, database `(default)`. Billing: "Firebase Payment" account. Created via `gcloud`.
 
-1. **Firestore schema** — create collection `watchlist/{userId}/comics/{comicId}` with fields:
-   `title`, `issue`, `publisher`, `grade`, `grader`, `recent_prices`, `last_sale`, `notes`
+- **Firestore auth = Application Default Credentials (ADC)**, not a key file. Set up locally
+  with `gcloud auth application-default login`. The agent process inherits ADC; no secret on
+  disk. `agent/.env` holds only `FIRESTORE_PROJECT=comic-sales-agent` (+ the existing
+  `GOOGLE_API_KEY`, which is Gemini-only and unrelated to Firestore).
 
-2. **Read tool** — ADK tool that fetches all comics for the current user from Firestore.
-   Replaces the hardcoded `WATCHLIST` list in `agent.py`. Agent calls this at query time.
+- **Firestore schema (per `docs/CPCD.md` §9 — this is the source of truth):**
+  ```
+  watchlist/{bookId}                 # bookId = slug, e.g. amazing-fantasy-15
+    title, issue, publisher, raw_or_graded, grader, grade, notes
+  watchlist/{bookId}/sales/{saleId}  # one doc per sale — NOT a flat price array
+    price, sale_date, source, url, raw_or_graded, grade   # per-sale grade (Phase 3 needs it)
+  ```
+  NOTE: there is **no `userId` path layer** (single-user v1) and **no flat `recent_prices`/
+  `last_sale` field** — `recent_prices`/`last_sale` are *derived on read* from the `sales`
+  subcollection for display only. (This corrected an earlier conflicting schema sketch.)
 
-3. **Write tool** — ADK tool that creates or updates a comic document in Firestore.
-   Agent calls this when the user adds, edits, or removes a comic conversationally.
+- **Tools** (`agent/comic_sales/tools/watchlist.py`, plain ADK function tools):
+  `get_watchlist()` (read all + derive recent prices), `upsert_comic(...)` (create/edit —
+  **partial update**, only writes provided fields so editing one field never clobbers others),
+  `remove_comic(book_id)` (deletes doc + its `sales` subcollection), `add_sale(...)`
+  (user-entered sale). Firestore client: `agent/comic_sales/firestore_client.py` (lazy
+  singleton reading `FIRESTORE_PROJECT`).
 
-4. **System prompt update** — instruct the agent to call the read tool before displaying
-   the watchlist, and the write tool before confirming any mutation.
+- **System prompt** instructs the agent to call `get_watchlist` before displaying, and the
+  write tools before confirming any mutation, then re-read and re-render.
 
-5. **App unchanged** — the Flutter rendering pipeline does not need to change. Whatever
-   A2UI the agent emits (with real data) renders the same way.
+- **Seed**: `agent/tools/seed_watchlist.py` migrated the two Phase-1 books into the new schema,
+  exploding each old `recent_prices` array into individual `sales` docs (weekly-spaced dates,
+  owned grade, `source="manual"`). Idempotent (deterministic ids).
+
+- **App unchanged**: the Flutter rendering pipeline is untouched; the agent emits the same A2UI
+  shape with real data.
+
+**Gotcha discovered:** `pyproject.toml` must pin `a2a-sdk[http-server]==0.3.6` (the
+`[http-server]` extra). Plain `a2a-sdk` lets `uv sync` prune `starlette`/`sse-starlette`, and
+then `adk api_server --a2a` fails with "Failed to setup A2A agent … Packages starlette and
+sse-starlette are required." Phase 1 worked only because those packages happened to be present.
+
+**Remaining (pending):** drive the iOS app end-to-end — "show me my watchlist" renders the two
+seeded books from Firestore, and conversational add/remove round-trips and persists.
 
 **Scope boundary for Phase 2:**
 - Local agent only (no Cloud Run yet)
-- Single hardcoded user ID (no auth yet)
+- Single user, no userId path layer (no auth yet)
 - BasicCatalog only (no custom catalog yet)
-- No price scraping (prices are user-entered only)
+- No price scraping (prices are user-entered / seeded only)
 
 ### Phase 3 — Live market data (deferred)
 
@@ -252,11 +276,15 @@ Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2U
 
 | File | Purpose |
 |------|---------|
-| `agent/comic_sales/agent.py` | Root ADK agent — callable instruction, gemini-2.5-flash, A2UI system prompt, hardcoded watchlist |
+| `agent/comic_sales/agent.py` | Root ADK agent — callable instruction, gemini-2.5-flash, A2UI system prompt, registers Firestore tools |
+| `agent/comic_sales/firestore_client.py` | Lazy Firestore client singleton (ADC, reads `FIRESTORE_PROJECT`) |
+| `agent/comic_sales/tools/watchlist.py` | ADK function tools: `get_watchlist`, `upsert_comic`, `remove_comic`, `add_sale` |
+| `agent/comic_sales/tools/__init__.py` | Exports the watchlist tools |
+| `agent/tools/seed_watchlist.py` | One-time idempotent seed/migration of Phase-1 books into Firestore |
 | `agent/comic_sales/agent.json` | A2A agent card — required by `adk api_server --a2a` |
 | `agent/comic_sales/__init__.py` | Makes `comic_sales` a Python package |
-| `agent/.env` | `GOOGLE_API_KEY=...` — gitignored |
-| `agent/pyproject.toml` | Python deps via uv — includes `google-adk`, `a2ui-agent-sdk` |
+| `agent/.env` | `GOOGLE_API_KEY=...`, `FIRESTORE_PROJECT=comic-sales-agent` — gitignored |
+| `agent/pyproject.toml` | Python deps via uv — `google-adk`, `a2ui-agent-sdk`, `a2a-sdk[http-server]`, `google-cloud-firestore` |
 | `app/lib/main.dart` | Full Flutter app — GenUI wiring, fallback A2UI parser, chat UI |
 | `app/pubspec.yaml` | Flutter deps — genui 0.9.2, genui_a2a 0.9.0, a2a 4.2.0, logging |
 | `CLAUDE.md` | This file |

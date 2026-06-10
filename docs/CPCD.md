@@ -5,8 +5,8 @@
 > else in the Claude Project hangs off it. When a decision changes, update the relevant
 > section and the ADR log — don't bury the change in a chat.
 
-**Status:** Phase 1 COMPLETE — Phase 2 next
-**Last updated:** 2026-06-08
+**Status:** Phase 2 in progress — agent + Firestore CRUD complete and verified; iOS app round-trip pending
+**Last updated:** 2026-06-09
 **Primary machine:** Personal MacBook Air M4 (direct Anthropic connection — avoids the Portkey beta-flag issue)
 
 ---
@@ -268,8 +268,14 @@ document with `grade` populated.
 - [x] Exact current versions: `genui 0.9.2`, `genui_a2a 0.9.0`, `a2a 4.2.0`, `google-adk 2.2.0`.
 - [x] Gemini model: `gemini-2.5-flash` (`gemini-2.0-flash` deprecated — returns 404).
 - [ ] Supported Agent Engine region (verify `us-central1`).
-- [ ] GCP project id / staging bucket (TODO).
-- [ ] Real watchlist schema reconciliation (§9) — seed data needed for Phase 2.
+- [x] GCP project id: **`comic-sales-agent`** (new, dedicated). Firestore Native mode, location
+      `nam5`, database `(default)`. Billing: "Firebase Payment" account. Agent auth = ADC
+      (`gcloud auth application-default login`); no service-account key. Staging bucket: still TODO (Phase 4 deploy).
+- [x] Real watchlist schema reconciliation (§9) — implemented as `watchlist/{bookId}` +
+      `sales/{saleId}` subcollection (no userId layer, no flat price array). The two Phase-1
+      books are seeded via `agent/tools/seed_watchlist.py`. Note: the earlier root-CLAUDE.md
+      sketch (`watchlist/{userId}/comics/{comicId}` + flat `recent_prices`) was **superseded** by
+      this §9 model and corrected in that file.
 - [ ] GenUI alpha breakage: `genui_a2a 0.9.0` has two known bugs (patched — see CLAUDE.md).
 - [ ] Phase 3 visualization: which price data source for the scraper? eBay completed listings
       confirmed as the source. Need to decide on scraping approach (direct or via an API).

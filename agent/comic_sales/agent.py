@@ -1,8 +1,9 @@
 """
-Spike A — Minimal ADK agent that emits A2UI for a hardcoded comic watchlist.
+Phase 2 — ADK agent that emits A2UI for a persistent Firestore comic watchlist.
 
-Goal: prove the ADK → A2UI pipeline works locally via `adk web`.
-No Firestore, no custom catalog yet — uses BasicCatalog + hardcoded data.
+The watchlist lives in Firestore (per docs/CPCD.md §9). The agent reads it and mutates
+it conversationally via the function tools in comic_sales/tools/watchlist.py, then composes
+A2UI from the returned data using the BasicCatalog.
 """
 
 from google.adk.agents import Agent
@@ -10,31 +11,7 @@ from a2ui.schema.manager import A2uiSchemaManager
 from a2ui.schema.constants import VERSION_0_9_1
 from a2ui.basic_catalog.provider import BasicCatalog
 
-# ---------------------------------------------------------------------------
-# Hardcoded watchlist — replaces Firestore for Spike A
-# ---------------------------------------------------------------------------
-WATCHLIST = [
-    {
-        "title": "Amazing Fantasy",
-        "issue": "#15",
-        "publisher": "Marvel",
-        "grade": 9.8,
-        "grader": "CGC",
-        "recent_prices": [18500, 19200, 17800, 21000, 20500],
-        "last_sale": 20500,
-        "notes": "1st appearance Spider-Man",
-    },
-    {
-        "title": "Incredible Hulk",
-        "issue": "#1",
-        "publisher": "Marvel",
-        "grade": 6.0,
-        "grader": "CGC",
-        "recent_prices": [9800, 10200, 9500, 11000],
-        "last_sale": 11000,
-        "notes": "1st appearance Hulk",
-    },
-]
+from .tools import add_sale, get_watchlist, remove_comic, upsert_comic
 
 # ---------------------------------------------------------------------------
 # A2UI system prompt
@@ -54,6 +31,16 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "Prefer structured UI over prose."
     ),
     workflow_description=(
+        "The watchlist is stored in Firestore. You have tools to read and change it:\n"
+        "- get_watchlist(): call this BEFORE displaying the watchlist or answering any "
+        "question about which comics the user tracks. Render only what it returns — never "
+        "invent comics or prices.\n"
+        "- upsert_comic(...): call this BEFORE confirming any add or edit. To edit, pass the "
+        "existing book_id (from get_watchlist); to add, leave book_id empty.\n"
+        "- remove_comic(book_id): call this BEFORE confirming a removal. Resolve the book_id "
+        "via get_watchlist first if the user names the comic by title/issue.\n"
+        "- add_sale(book_id, price, ...): call this when the user reports a sale price to track.\n"
+        "After any mutation, call get_watchlist again and re-render the updated list.\n\n"
         "When the user asks about their watchlist or a specific comic, respond "
         "with an A2UI block containing the relevant data. "
         "Always include: title, issue, grade, grader, and last sale price. "
@@ -74,17 +61,7 @@ _system_prompt = _schema_mgr.generate_system_prompt(
     include_examples=False,
 )
 
-# Inject the hardcoded watchlist into the system prompt so the agent
-# can reason about it without tool calls in Spike A.
-_watchlist_block = "\n\n## Current Watchlist (hardcoded for Spike A)\n"
-for book in WATCHLIST:
-    prices_str = ", ".join(f"${p:,}" for p in book["recent_prices"])
-    _watchlist_block += (
-        f"- {book['title']} {book['issue']} | {book['grader']} {book['grade']} "
-        f"| Last sale: ${book['last_sale']:,} | Recent: {prices_str} | {book['notes']}\n"
-    )
-
-_INSTRUCTION = _system_prompt + _watchlist_block
+_INSTRUCTION = _system_prompt
 
 # ADK template-substitutes any {…} tokens in a plain string instruction,
 # which breaks A2UI's embedded JSON schema. Using a callable bypasses that.
@@ -99,4 +76,5 @@ root_agent = Agent(
     model="gemini-2.5-flash",
     description="Comic book sales tracking agent — emits A2UI catalog payloads.",
     instruction=instruction,
+    tools=[get_watchlist, upsert_comic, remove_comic, add_sale],
 )

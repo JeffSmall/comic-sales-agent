@@ -12,9 +12,15 @@ agent/
 ├─ CLAUDE.md              ← you are here
 ├─ comic_sales/           # ADK agent module (folder name = A2A URL segment)
 │  ├─ __init__.py
-│  ├─ agent.py            # Root agent definition
-│  └─ agent.json          # A2A agent card (required by adk api_server --a2a)
-├─ .env                   # GOOGLE_API_KEY=... (gitignored)
+│  ├─ agent.py            # Root agent definition (registers Firestore tools)
+│  ├─ agent.json          # A2A agent card (required by adk api_server --a2a)
+│  ├─ firestore_client.py # Lazy Firestore client singleton (ADC)
+│  └─ tools/
+│     ├─ __init__.py
+│     └─ watchlist.py     # ADK function tools: get_watchlist, upsert_comic, remove_comic, add_sale
+├─ tools/
+│  └─ seed_watchlist.py   # One-time idempotent seed/migration of Phase-1 books → Firestore
+├─ .env                   # GOOGLE_API_KEY=..., FIRESTORE_PROJECT=... (gitignored)
 ├─ pyproject.toml         # Python deps managed by uv
 └─ .venv/                 # Virtual environment (gitignored)
 ```
@@ -38,8 +44,25 @@ Managed by `uv` (not pip). Key packages:
 - `google-adk==2.2.0`
 - `a2ui-agent-sdk` (provides `A2uiSchemaManager`, `BasicCatalog`)
 - `a2a-sdk[http-server]==0.3.6` (required by `adk api_server --a2a`)
+- `google-cloud-firestore` (Phase 2 — watchlist persistence)
 
 To install: `uv sync`
+
+> **The `[http-server]` extra is load-bearing.** If `pyproject.toml` pins plain `a2a-sdk`,
+> `uv sync` prunes `starlette`/`sse-starlette` and `adk api_server --a2a` then fails at startup
+> with "Failed to setup A2A agent … Packages starlette and sse-starlette are required."
+
+## Firestore auth (Phase 2)
+
+The agent reads/writes Firestore in GCP project **`comic-sales-agent`** (Native mode, `nam5`)
+using **Application Default Credentials** — no service-account key file. Set up locally once:
+
+```bash
+gcloud auth application-default login
+```
+
+`agent/.env` carries `FIRESTORE_PROJECT=comic-sales-agent`. ADK loads `.env`, so the running
+server picks it up; standalone scripts (e.g. the seed) need the var passed explicitly.
 
 ## How the agent works
 
@@ -99,17 +122,25 @@ block. Reason: Python hoists the local import to function scope, shadowing the m
 
 This patch is lost when the venv is rebuilt. Re-apply it after `uv sync`.
 
-## Phase 2 — What changes next
+## Phase 2 — Firestore watchlist (built)
 
-Replace the hardcoded `WATCHLIST` list in `agent.py` with an ADK tool that reads from
-Firestore. The system prompt, model, server mode, and agent card do not change.
+The hardcoded `WATCHLIST` list is gone. `agent.py` now registers four ADK function tools from
+`comic_sales/tools/watchlist.py` and the system prompt tells the model to call them:
 
-Planned structure:
-```
-agent/
-└─ comic_sales/
-   ├─ agent.py       # add tool reference
-   ├─ tools/
-   │  └─ watchlist.py  # new — Firestore read tool
-   └─ ...
+- `get_watchlist()` — reads all `watchlist/{bookId}` docs; derives `recent_prices`/`last_sale`
+  on the fly from each book's `sales` subcollection (prices are NOT stored flat — see CPCD §9).
+- `upsert_comic(title, issue, book_id?, ...)` — create or edit. **Partial update**: only the
+  fields you pass are written, so editing one field never clobbers the others. Empty `book_id`
+  ⇒ a stable slug id is derived from title+issue.
+- `remove_comic(book_id)` — deletes the doc and its `sales` subcollection (Firestore won't
+  cascade).
+- `add_sale(book_id, price, ...)` — appends a user-entered sale to the `sales` subcollection.
+
+The model, server mode (`adk api_server --a2a`), agent card, callable-instruction pattern, and
+the createSurface/`catalogId` rules are all unchanged from Phase 1.
+
+Seed/migrate Phase-1 data once (deterministic ids, safe to re-run):
+```bash
+cd agent && source .venv/bin/activate
+FIRESTORE_PROJECT=comic-sales-agent python tools/seed_watchlist.py
 ```

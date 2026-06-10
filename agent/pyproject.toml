@@ -6,7 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "google-adk==2.2.0",
     "a2ui-agent-sdk==0.2.4",
-    "a2a-sdk==0.3.6",
+    "a2a-sdk[http-server]==0.3.6",
+    "google-cloud-firestore>=2.16",
 ]
 
 [project.optional-dependencies]

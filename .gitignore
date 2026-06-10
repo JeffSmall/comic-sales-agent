@@ -43,6 +43,9 @@ htmlcov/
 # uv
 .uv/
 
+# ADK local runtime state (session store, etc.)
+.adk/
+
 # macOS
 .DS_Store
 .AppleDouble
