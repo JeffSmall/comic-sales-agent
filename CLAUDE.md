@@ -52,7 +52,7 @@ This monorepo implements a two-sided AI sales agent for comics:
 | Phase | Scope | Status |
 |-------|-------|--------|
 | Phase 1 — Local proof of concept | Spike A (agent emits A2UI), Spike B (Flutter renders A2UI) | ✅ COMPLETE — tagged `phase1-complete` |
-| Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | 🚧 Agent + Firestore complete and verified; iOS app round-trip verification pending |
+| Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | ✅ COMPLETE — verified end-to-end in the iOS app (read + conversational add/remove render and persist) |
 | Phase 3 — Live market data | Scheduled price scraper → Firestore; agent surfaces price movement | 🔜 Deferred |
 | Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
 
@@ -267,8 +267,17 @@ user reads from and writes to conversationally through the existing chat UI.
   `FIRESTORE_PROJECT` was in `.env` (or before ADC existed), `get_watchlist` fails and the turn
   dies. Always restart the agent after changing `.env` or auth.
 
-**Remaining (pending):** drive the iOS app end-to-end — "show me my watchlist" renders the two
-seeded books from Firestore, and conversational add/remove round-trips and persists.
+**Verified end-to-end in the iOS app:** "show me my watchlist" renders the Firestore-backed
+books, and conversational add/remove round-trips, re-renders, and persists (tested up to 4 books).
+
+**App-side gotcha (fixed during Phase 2 verification):** the Flutter fallback parser
+(`app/lib/main.dart` `_injectA2uiFromBuffer`) originally parsed the accumulated
+`_responseBuffer`, which concatenates every streaming `textStream` emission. For larger A2UI
+payloads (3+ comics, ~2.5KB) `a2a 4.2.0`'s SSE reassembly interleaves/duplicates chunks and
+corrupts the JSON — only `createSurface` parsed, `updateComponents` failed with
+`FormatException`, so the surface showed stale data. Fix: parse the **return value of
+`connectAndSend`** (the single complete final-message text) instead of the buffer; dedupe
+identical blocks. See `app/CLAUDE.md`.
 
 **Scope boundary for Phase 2:**
 - Local agent only (no Cloud Run yet)

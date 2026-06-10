@@ -123,18 +123,27 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _sendToAgent(ChatMessage message) async {
     _responseBuffer.clear();
+    String? responseText;
     try {
-      await _connector.connectAndSend(message);
+      responseText = await _connector.connectAndSend(message);
     } catch (e, st) {
       debugPrint('[sendToAgent] EXCEPTION: $e');
       debugPrint('[sendToAgent] STACK: $st');
       rethrow;
     }
-    // Fallback: the streaming A2uiParserTransformer may silently drop JSON due
-    // to Map<String,dynamic> vs Map<String,Object?> type-check differences at
-    // runtime. After the full response arrives, parse <a2ui-json> blocks
-    // manually and inject them directly into the transport.
-    _injectA2uiFromBuffer(_responseBuffer.toString());
+    // The streaming A2uiParserTransformer may silently drop JSON (Map<String,
+    // dynamic> vs Map<String,Object?> at runtime), so we parse <a2ui-json>
+    // blocks ourselves. PREFER connectAndSend's return value: it is the single,
+    // complete text of the final agent message. _responseBuffer concatenates
+    // every textStream emission, and for large payloads the streaming SSE
+    // reassembly interleaves/duplicates chunks and corrupts the JSON (the
+    // fallback parser then fails mid-block). Use the buffer only if the return
+    // value somehow lacks A2UI.
+    final source =
+        (responseText != null && responseText.contains('<a2ui-json>'))
+        ? responseText
+        : _responseBuffer.toString();
+    _injectA2uiFromBuffer(source);
   }
 
   // Regex-extracts every <a2ui-json>…</a2ui-json> block from [text], decodes
@@ -142,9 +151,13 @@ class _ChatPageState extends State<ChatPage> {
   void _injectA2uiFromBuffer(String text) {
     final regex = RegExp(r'<a2ui-json>([\s\S]*?)</a2ui-json>', multiLine: true);
     var found = 0;
+    final seen = <String>{};
     for (final match in regex.allMatches(text)) {
       final jsonStr = match.group(1)?.trim();
       if (jsonStr == null || jsonStr.isEmpty) continue;
+      // Skip exact-duplicate blocks (the same A2UI can arrive more than once,
+      // e.g. as both a message and an artifact).
+      if (!seen.add(jsonStr)) continue;
       try {
         final decoded = jsonDecode(jsonStr);
         if (decoded is! Map) {

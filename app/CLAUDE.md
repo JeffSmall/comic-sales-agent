@@ -86,10 +86,19 @@ User types query
 returns). This is a bug in `genui 0.9.2`.
 
 The active rendering path is `_injectA2uiFromBuffer()`:
-1. After `connectAndSend` returns, parse the accumulated `_responseBuffer` with a regex
-   for `<a2ui-json>([\s\S]*?)</a2ui-json>` blocks
-2. For each block: `jsonDecode` → `Map<String, Object?>.from(decoded as Map)` → `A2uiMessage.fromJson()` → `_transport.addMessage()`
-3. `addMessage` bypasses the parser and goes directly to `_messageStream`
+1. Parse `<a2ui-json>([\s\S]*?)</a2ui-json>` blocks out of the agent's response text.
+2. For each unique block: `jsonDecode` → `Map<String, Object?>.from(...)` →
+   `A2uiMessage.fromJson()` → `_transport.addMessage()` (bypasses the buggy parser).
+
+**Parse the return value of `connectAndSend`, NOT `_responseBuffer` (CRITICAL).**
+`connectAndSend` returns the single, complete text of the final agent message.
+`_responseBuffer` accumulates *every* `textStream` emission, and for large payloads
+(e.g. a 3+ comic watchlist, ~2.5KB of A2UI) the streaming SSE reassembly in `a2a 4.2.0`
+interleaves/duplicates chunks, producing malformed JSON — the fallback then fails with
+`FormatException: Unexpected character` mid-block and only the `createSurface` injects, so
+the surface never updates (stale UI). `_sendToAgent` therefore prefers the returned text and
+only falls back to `_responseBuffer` if the return value lacks `<a2ui-json>`. The parser also
+dedupes identical blocks (the same A2UI can arrive as both a message and an artifact).
 
 `addChunk` is still called (for prose text in `ConversationContentReceived`), but it is
 NOT relied upon for widget rendering.

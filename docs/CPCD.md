@@ -5,7 +5,7 @@
 > else in the Claude Project hangs off it. When a decision changes, update the relevant
 > section and the ADR log — don't bury the change in a chat.
 
-**Status:** Phase 2 in progress — agent + Firestore CRUD complete and verified; iOS app round-trip pending
+**Status:** Phase 2 COMPLETE — Firestore-backed watchlist verified end-to-end in the iOS app (read + conversational add/remove). Phase 3 next.
 **Last updated:** 2026-06-09
 **Primary machine:** Personal MacBook Air M4 (direct Anthropic connection — avoids the Portkey beta-flag issue)
 
