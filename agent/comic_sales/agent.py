@@ -7,6 +7,7 @@ A2UI from the returned data using the BasicCatalog.
 """
 
 from google.adk.agents import Agent
+from google.genai import types
 from a2ui.schema.manager import A2uiSchemaManager
 from a2ui.schema.constants import VERSION_0_9_1
 from a2ui.basic_catalog.provider import BasicCatalog
@@ -40,7 +41,10 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "- remove_comic(book_id): call this BEFORE confirming a removal. Resolve the book_id "
         "via get_watchlist first if the user names the comic by title/issue.\n"
         "- add_sale(book_id, price, ...): call this when the user reports a sale price to track.\n"
-        "After any mutation, call get_watchlist again and re-render the updated list.\n\n"
+        "After any mutation, call get_watchlist again and re-render the updated list.\n"
+        "If a tool returns {\"status\": \"error\", ...}, do NOT stay silent: emit the usual "
+        "createSurface + updateComponents blocks with one Card whose Text briefly explains, in "
+        "plain language, that the request could not be completed.\n\n"
         "When the user asks about their watchlist or a specific comic, respond "
         "with an A2UI block containing the relevant data. "
         "Always include: title, issue, grade, grader, and last sale price. "
@@ -77,4 +81,12 @@ root_agent = Agent(
     description="Comic book sales tracking agent — emits A2UI catalog payloads.",
     instruction=instruction,
     tools=[get_watchlist, upsert_comic, remove_comic, add_sale],
+    # gemini-2.5-flash's thinking mode intermittently returns an EMPTY completion
+    # (0 output tokens, finish=STOP) on the function-calling + large-A2UI-schema path,
+    # which makes the agent silently render nothing (~25% of the time). Disabling
+    # thinking makes output reliable — this is a structured formatting task that does
+    # not benefit from it. Measured: thinking on = 6/8 success; thinking off = 8/8.
+    generate_content_config=types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    ),
 )

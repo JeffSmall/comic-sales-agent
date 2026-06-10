@@ -241,10 +241,31 @@ user reads from and writes to conversationally through the existing chat UI.
 - **App unchanged**: the Flutter rendering pipeline is untouched; the agent emits the same A2UI
   shape with real data.
 
-**Gotcha discovered:** `pyproject.toml` must pin `a2a-sdk[http-server]==0.3.6` (the
-`[http-server]` extra). Plain `a2a-sdk` lets `uv sync` prune `starlette`/`sse-starlette`, and
-then `adk api_server --a2a` fails with "Failed to setup A2A agent … Packages starlette and
-sse-starlette are required." Phase 1 worked only because those packages happened to be present.
+**Gotchas discovered:**
+
+- `pyproject.toml` must pin `a2a-sdk[http-server]==0.3.6` (the `[http-server]` extra). Plain
+  `a2a-sdk` lets `uv sync` prune `starlette`/`sse-starlette`, and then `adk api_server --a2a`
+  fails with "Failed to setup A2A agent … Packages starlette and sse-starlette are required."
+  Phase 1 worked only because those packages happened to be present.
+
+- **gemini-2.5-flash thinking → intermittent EMPTY responses (CRITICAL).** With function-calling
+  tools + the large (~11.8k-token) A2UI-schema system prompt, gemini-2.5-flash's *thinking* mode
+  intermittently returns a completely empty completion (0 output tokens, `finish=STOP`) — ~25%
+  of the time. The agent then renders nothing and the app appears to "do nothing." Symptom over
+  A2A: the task goes `submitted → working → working/final` with **no content message** and never
+  reaches `completed`. Fix: disable thinking on the agent —
+  `generate_content_config=types.GenerateContentConfig(thinking_config=ThinkingConfig(thinking_budget=0))`.
+  Measured: thinking on = 6/8 success; thinking off = 8/8, and 6/6 over A2A. This is a structured
+  formatting task that does not benefit from thinking. (Phase 1 never hit this — no tools.)
+
+- **A tool that raises aborts the A2A turn silently** — no error reaches the client, the app just
+  shows nothing. The watchlist tools therefore catch exceptions and return
+  `{"status": "error", "error": "..."}` so the model can render a graceful message instead. The
+  system prompt instructs the model to render an error Card on `status: "error"`.
+
+- **A stale agent process is a real failure mode.** If the server was started before
+  `FIRESTORE_PROJECT` was in `.env` (or before ADC existed), `get_watchlist` fails and the turn
+  dies. Always restart the agent after changing `.env` or auth.
 
 **Remaining (pending):** drive the iOS app end-to-end — "show me my watchlist" renders the two
 seeded books from Firestore, and conversational add/remove round-trips and persists.

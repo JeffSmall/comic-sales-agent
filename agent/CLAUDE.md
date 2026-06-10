@@ -112,6 +112,13 @@ The Python `a2ui-agent-sdk` uses a different default catalogId — do not use it
 
 Use `gemini-2.5-flash`. `gemini-2.0-flash` is deprecated and returns 404.
 
+**Disable thinking (Phase 2, CRITICAL).** The agent sets
+`generate_content_config=GenerateContentConfig(thinking_config=ThinkingConfig(thinking_budget=0))`.
+With the function-calling tools + the large A2UI-schema prompt, gemini-2.5-flash's thinking mode
+intermittently returns an EMPTY completion (0 output tokens, `finish=STOP`) ~25% of the time —
+the agent then renders nothing and the app looks broken. Disabling thinking made it reliable
+(measured 8/8 in-process, 6/6 over A2A vs 6/8 with thinking on). Do not remove this config.
+
 ## Vendor patch required
 
 `agent/.venv/lib/python3.12/site-packages/google/adk/cli/fast_api.py` ~line 748:
