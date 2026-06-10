@@ -166,6 +166,7 @@ right-aligned numerics, high density (sparklines, small multiples, dense matrice
 | ADR-005 | Monorepo, one Claude Project | Accepted | Clean Project↔repo mapping; shared CLAUDE.md/ACT context. |
 | ADR-006 | Isolate GenUI behind an adapter | Accepted | GenUI is alpha; protect data/business logic from breaking changes. |
 | ADR-007 | Firestore as the data store | Accepted | Reuses existing Firebase fluency; replaces Numbers/xlsx output. |
+| ADR-008 | Generative-UI positioning: declarative, catalog-constrained (flavor 2) | Accepted | Deliberately agent-composes-from-a-fixed-catalog, fenced toward flavor 1's safety; explicitly rejects flavor-3 model-authored UI. Richer needs → extend the catalog, not open codegen. See [ADR/008-genui-positioning.md](ADR/008-genui-positioning.md). |
 
 ---
 
