@@ -53,7 +53,7 @@ This monorepo implements a two-sided AI sales agent for comics:
 |-------|-------|--------|
 | Phase 1 — Local proof of concept | Spike A (agent emits A2UI), Spike B (Flutter renders A2UI) | ✅ COMPLETE — tagged `phase1-complete` |
 | Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | ✅ COMPLETE — verified end-to-end in the iOS app (read + conversational add/remove render and persist) |
-| Phase 3 — Live market data | Spike C (historical backfill), then price-history tools + visualization catalog | 🚧 IN PROGRESS — Spike C scraper tooling built & validated; live backfill run still pending (eBay rate-limit cool-down) |
+| Phase 3 — Live market data | Spike C (historical backfill), then price-history tools + visualization catalog | 🚧 IN PROGRESS — Spike C ✅ COMPLETE (785 real grade-level sales across all 12 books in Firestore; gate met). Next: `get_price_history` tool, `refresh_sales` + "Update Sales" button, visualization catalog |
 | Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
 
 ---
@@ -285,16 +285,20 @@ identical blocks. See `app/CLAUDE.md`.
 - BasicCatalog only (no custom catalog yet)
 - No price scraping (prices are user-entered / seeded only)
 
-### Phase 3 — Live market data (IN PROGRESS — Spike C)
+### Phase 3 — Live market data (IN PROGRESS — Spike C COMPLETE)
 
 **Goal:** Populate the `sales` subcollection with real ~90-day eBay sold-listing history per
 watchlist book, so the visualization catalog (Sparkline, GradeTierMatrix, SmallMultiplesGrid)
 has real grade-level data to render against. Spike C de-risks the data acquisition first.
 
-**Status:** scraper tooling **built and validated**; the **live backfill run is still pending**
-an eBay rate-limit cool-down (see below). The `sales` subcollection is currently empty (the old
-Phase-1/2 seed sales for Amazing Fantasy #15 / Incredible Hulk #1 were removed during watchlist
-edits). **The Spike C gate (≥3 books with real grade-level sales) is NOT yet met.**
+**Status:** Spike C is ✅ **COMPLETE**. A single paced full-sweep (`--book-interval 900 --commit
+--classify`, ~3 hrs wall-clock, residential IP) landed **785 real sales across all 12 watchlist
+books** in Firestore — every book has grade-level graded + raw history (424 graded / 361 raw,
+verified by read-back). **The Spike C gate (≥3 books with real grade-level sales) is exceeded.**
+The classifier behaved well across the sweep (dropped 3D/foil editions, Wizard Ace / Millennium /
+Dollar reprints, foreign/European variants, homage covers, multi-book lots; kept genuine keys).
+No Imperva block on any book — the cool-down + 15-min pacing held. Routine refreshes now switch
+to `--incremental` (see below).
 
 **What was built — `agent/tools/backfill_sales.py`** (mirrors `seed_watchlist.py`: reads the
 watchlist from Firestore, writes `sales/{saleId}` docs directly; `--dry-run` by default,
@@ -319,14 +323,20 @@ watchlist from Firestore, writes `sales/{saleId}` docs directly; `--dry-run` by 
   Run datacenter IP would be blocked by Imperva. **This reshapes the Phase 4 cloud-scraper plan** —
   for eBay, local scheduling (or a residential proxy / paid comic API) is required, not Cloud Run.
 - **Parsing:** current eBay layout is `.s-card` (not the old `.s-item`). Extracts title, price,
-  sold date, listing URL. Per-sale `grade` regex (allows `.2/.4/.6/.8`) and a nullable
-  **`edition`** field (`newsstand`/`direct`/null — a small extension beyond CPCD §9, detected from
-  explicit title wording only; never assumed).
+  sold date, listing URL. Per-sale `grade` regex (`_GRADE_RE`) allows `.2/.4/.6/.8` AND an optional
+  `grade`/`graded` word between the company and the number (`CGC GRADE 9.8`, `CBCS GRADED 9.6`),
+  plus a nullable **`edition`** field (`newsstand`/`direct`/null — a small extension beyond CPCD §9,
+  detected from explicit title wording only; never assumed).
 - **Precision is the hard part (CPCD flagged it).** Two-stage filter: (1) cheap heuristic —
-  contiguous `title+issue` normalized match + a reject list (facsimile/reprint/lot/merch) — strips
-  wrong-series junk; (2) optional **Gemini classifier** (`--classify`, `gemini-2.5-flash`, batched,
-  fails OPEN) drops the residue heuristics can't catch: homage/variant covers and reprints that
-  print the key's name in their own title. Validated **15/15** offline on real captured titles.
+  `_matches_book` requires the book's `title` followed by its `issue` as a **standalone `\b`-bounded
+  token**, optionally separated by a 4-digit publication year (so it keeps `X-Men (1975) #94` and
+  `Detective Comics 359 1967`, while `#94` still rejects `#194`/`#940`) — plus a reject list
+  (facsimile/reprint/lot/merch) to strip wrong-series junk; (2) optional **Gemini classifier**
+  (`--classify`, `gemini-2.5-flash`, batched, fails OPEN) drops the residue heuristics can't catch:
+  homage/variant covers and reprints that print the key's name in their own title. NOTE: the
+  classifier only runs on KEPT items, so a heuristic false-negative is lost permanently — the
+  matcher errs toward recall (the earlier space-stripping `_norm` over-rejected listings where a
+  year ran into the issue number, e.g. only 13/200 kept for X-Men #94; now fixed).
 - **Deps:** `curl_cffi`, `beautifulsoup4`, `lxml` live in the `[backfill]` optional extra
   (`uv sync --extra backfill`), kept out of the deployed agent runtime. `google-genai` (for
   `--classify`) is already an agent dep. The script auto-loads `agent/.env`.

@@ -162,8 +162,10 @@ A standalone scraper that fills each watchlist book's `sales/{saleId}` subcollec
 Same shape as the seed script (reads the watchlist, writes `sales` docs, idempotent via
 deterministic `ebay-<itemId>` ids), `--dry-run` by default / `--commit` to persist.
 
-**Status: tooling built & validated; the live `--commit` run is still pending an eBay
-rate-limit cool-down. The `sales` subcollection is empty — the Spike C gate is not yet met.**
+**Status: ✅ COMPLETE.** One paced full-sweep (`--book-interval 900 --classify --commit`, ~3 hrs,
+residential IP) landed **785 real sales across all 12 books** (424 graded / 361 raw, verified by
+read-back). No Imperva block — the cool-down + 15-min pacing held. The Spike C gate (≥3 books with
+grade-level sales) is exceeded. Routine refreshes now use `--incremental`.
 
 **How it gets past eBay (the de-risked unknowns):**
 - Plain HTTP is blocked at the **TLS layer** (Akamai) → 403. Fix: **`curl_cffi` impersonating
@@ -177,12 +179,17 @@ rate-limit cool-down. The `sales` subcollection is empty — the Spike C gate is
 - **Residential IP is essential** — a Cloud Run / datacenter IP gets blocked. Don't move this
   scraper to Cloud Run without a residential proxy (revisits the Phase 4 plan).
 
-**Precision (the genuinely hard part):** two stages — a cheap heuristic (contiguous `title+issue`
-normalized match + reject list for facsimile/reprint/lot/merch) strips wrong-series junk, then an
-optional **Gemini classifier** (`--classify`) drops homage/variant/reprint listings that print the
-key's name in their own title. Classifier batches titles, runs `gemini-2.5-flash` with
-thinking off, and **fails open** (keeps a borderline rather than dropping a real sale). Validated
-15/15 on real captured titles.
+**Precision (the genuinely hard part):** two stages — a cheap heuristic (`_matches_book`: the
+book's `title` followed by its `issue` as a standalone `\b`-bounded token, optionally separated by
+a 4-digit publication year — keeps `X-Men (1975) #94` / `Detective Comics 359 1967`, while `#94`
+still rejects `#194`/`#940` — plus a reject list for facsimile/reprint/lot/merch) strips
+wrong-series junk, then an optional **Gemini classifier** (`--classify`) drops homage/variant/reprint
+listings that print the key's name in their own title. Classifier batches titles, runs
+`gemini-2.5-flash` with thinking off, and **fails open** (keeps a borderline rather than dropping a
+real sale). Because the classifier only sees KEPT items, the matcher errs toward recall: an earlier
+space-stripping normalizer ran the issue into a trailing year and over-rejected (only 13/200 kept
+for X-Men #94); the token matcher fixes this. The `grade` regex also tolerates `CGC GRADE 9.8` /
+`CBCS GRADED 9.6` wording.
 
 **Schema note:** adds a nullable **`edition`** (`newsstand`/`direct`/null) to each sale doc — a
 small, additive extension beyond CPCD §9 to support edition-level price analysis.

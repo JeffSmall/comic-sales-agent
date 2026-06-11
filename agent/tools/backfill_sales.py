@@ -99,9 +99,13 @@ _CLASSIFIER_BATCH = 40
 
 # Sold-date caption, e.g. "Sold  Jun 10, 2026"
 _SOLD_DATE_RE = re.compile(r"Sold\s+([A-Z][a-z]{2}\s+\d{1,2},\s+20\d{2})")
-# Grade, e.g. "CGC 9.8", "CBCS9.6", "PGX 7.0". Requires a grading company + a 0.5..10 number.
-# Decimals run .0/.2/.4/.6/.8 (and .5 at the low end), so allow any single decimal digit.
-_GRADE_RE = re.compile(r"\b(CGC|CBCS|PGX|EGC)\s*(10(?:\.0)?|[0-9](?:\.\d)?)\b", re.I)
+# Grade, e.g. "CGC 9.8", "CBCS9.6", "PGX 7.0", "CGC GRADE 9.8". Requires a grading company +
+# a 0.5..10 number; an optional "grade"/"graded" word may sit between (sellers write
+# "CGC GRADE 9.8" / "CGC GRADED 9.6"). Decimals run .0/.2/.4/.6/.8 (and .5 at the low end),
+# so allow any single decimal digit.
+_GRADE_RE = re.compile(
+    r"\b(CGC|CBCS|PGX|EGC)\s*(?:graded?\s*)?(10(?:\.0)?|[0-9](?:\.\d)?)\b", re.I
+)
 # Money, e.g. "$18,500.00"
 _PRICE_RE = re.compile(r"\$\s*([0-9][0-9,]*(?:\.\d{2})?)")
 # eBay listing id from a /itm/<id> URL.
@@ -291,25 +295,40 @@ def _parse_sold_date(text: str) -> datetime | None:
 
 
 def _norm(s: str) -> str:
-    """Lowercase and strip every non-alphanumeric char, for order-preserving substring match."""
-    return re.sub(r"[^a-z0-9]+", "", s.lower())
+    """Lowercase, collapse every run of non-alphanumeric chars to a single space, and trim.
+
+    Keeping a space (rather than deleting it) preserves token boundaries, so the issue number
+    can be matched as a standalone word. Deleting separators is lossy: "#92 1st" would become
+    "921st" and "#1 (1975)" would become "11975", running the issue into trailing digits.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 
 def _matches_book(title: str, issue: str, listing_title: str) -> bool:
-    """True only if the listing title contains the book's title immediately followed by its
-    issue number, as a contiguous run (ignoring spaces/punctuation).
+    """True only if the listing title contains the book's title followed by its issue number
+    as a standalone token, optionally separated by a 4-digit publication year (comic listings
+    very often read "X-Men (1975) #94" or "Detective Comics 359 1967").
 
-    A bare issue-number check ("\\b15\\b") is hopeless — "15"/"1" appear in countless
-    unrelated titles. Requiring "<title><issue>" adjacent (e.g. "amazingfantasy15",
-    "giantsizexmen1") rejects different series ("Classic X-Men #1", "Immortal Hulk"),
-    most reprints whose edition word splits the title from the issue ("Giant-Size X-Men
-    Facsimile Edition #1"), and SEO noise. It cannot catch homage/variant covers that
-    literally print "<title> <issue>" in their own title — those are a known residual.
+    A bare issue-number check ("\\b15\\b") is hopeless — "15"/"1" appear in countless unrelated
+    titles. Requiring "<title> [year] <issue>" rejects different series ("Immortal Hulk"), most
+    reprints whose edition word splits the title from the issue ("Giant-Size X-Men Facsimile
+    Edition #1"), and SEO noise. The `\\b` token boundary keeps the issue a whole number, so
+    "#94" matches neither "#194" nor "#940".
+
+    Known residuals it still can't catch: homage/variant covers that literally print
+    "<title> <issue>", listings where a non-year word ("No.", "Vol 1") separates title from
+    issue, and broader-named series that contain the title ("Classic X-Men #1" for "X-Men #1")
+    — all left to the reject list / Gemini classifier or accepted as a small recall loss.
     """
     num = issue.lstrip("#").strip()
+    t = _norm(title)
+    lt = _norm(listing_title)
+    if not t:
+        return False
     if not num:
-        return _norm(title) in _norm(listing_title)
-    return (_norm(title) + num) in _norm(listing_title)
+        return re.search(rf"\b{re.escape(t)}\b", lt) is not None
+    pat = rf"\b{re.escape(t)}\b(?:\s+\d{{4}})?\s+{re.escape(num)}\b"
+    return re.search(pat, lt) is not None
 
 
 def _parse_cards(html: str, title: str, issue: str, cutoff: datetime) -> tuple[list[Sale], dict]:
