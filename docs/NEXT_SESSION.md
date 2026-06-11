@@ -25,17 +25,18 @@ and `docs/CPCD.md` (§8 Phase 3, §9 schema, §11). Below is the live state and 
     was run (respecting the eBay cool-down), so **X-Men #94 still has only 13 stored sales**
     until its next refresh re-scrapes with the improved matcher.
 
-## Immediate next action — build `get_price_history`
+## Done since the backfill
 
-Add an ADK function tool `get_price_history(book_id, days, grade?)` in
-`agent/comic_sales/tools/` (sibling of `watchlist.py`; export it via `tools/__init__.py` and
-register it in `agent.py`). It reads `watchlist/{book_id}/sales`, filters by date window (and
-optionally grade / grade-tier), and returns a structure the agent can summarize and, later,
-feed the visualization catalog. Mirror the existing watchlist tools' conventions: catch
-exceptions and return `{"status": "error", ...}` (a raising tool silently aborts the A2A turn),
-and keep `get_watchlist`'s derive-on-read pattern (prices are NOT stored flat — CPCD §9).
+- **`get_price_history(book_id, days, grade?)` is BUILT** —
+  `agent/comic_sales/tools/price_history.py`, exported via `tools/__init__.py`, registered in
+  `agent.py`, and described in the system prompt. Reads `watchlist/{book_id}/sales` for a window
+  with an optional exact-grade filter; returns an overall summary (min/max/median/avg, first→last
+  `change_pct`, graded/raw counts), a per-grade breakdown + raw bucket (feeds GradeTierMatrix),
+  and the chronological sales series for charting. Mirrors the watchlist tools' structured-error
+  + derive-on-read conventions. Verified live against Firestore (new-mutants-98: 98 sales,
+  grade=9.8 → 12 sales median $1,000).
 
-## After that (Phase 3 remainder)
+## Immediate next action — `refresh_sales` tool + Flutter "Update Sales" button
 
 - **`refresh_sales` tool + Flutter "Update Sales" button** — NON-BLOCKING ADK tool that
   launches the scraper as a detached, `caffeinate -i`-wrapped background process and returns

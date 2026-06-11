@@ -370,9 +370,13 @@ immediately ("started; ~M min in the background"). Key constraints discovered:
 - **Only works while the agent runs locally** (residential IP). A Cloud Run agent can't run a
   local scraper, so the scraper stays a local component even after Phase 4 deploys the agent.
 
-**Remaining after the backfill lands:** `get_price_history(bookId, days, grade?)` tool;
-`refresh_sales` tool + "Update Sales" button; agent surfaces price movement / grade-variance;
-build the visualization catalog items.
+**Remaining after the backfill lands:** ✅ `get_price_history(book_id, days, grade?)` tool —
+**BUILT** (`agent/comic_sales/tools/price_history.py`, registered in `agent.py`): reads the
+`sales` subcollection for a window, optional exact-grade filter, returns an overall summary
+(min/max/median/avg, first→last change_pct, graded/raw counts), a per-grade breakdown + raw
+bucket (feeds the future GradeTierMatrix), and the chronological sales series for charting.
+Verified live against Firestore. Still TODO: `refresh_sales` tool + "Update Sales" button;
+agent surfaces price movement / grade-variance; build the visualization catalog items.
 
 ### Phase 4 — Production (deferred)
 
@@ -387,6 +391,7 @@ Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2U
 | `agent/comic_sales/agent.py` | Root ADK agent — callable instruction, gemini-2.5-flash, A2UI system prompt, registers Firestore tools |
 | `agent/comic_sales/firestore_client.py` | Lazy Firestore client singleton (ADC, reads `FIRESTORE_PROJECT`) |
 | `agent/comic_sales/tools/watchlist.py` | ADK function tools: `get_watchlist`, `upsert_comic`, `remove_comic`, `add_sale` |
+| `agent/comic_sales/tools/price_history.py` | Phase 3 ADK tool `get_price_history(book_id, days, grade?)` — derives price summary, per-grade breakdown, and chronological sales series from the `sales` subcollection |
 | `agent/comic_sales/tools/__init__.py` | Exports the watchlist tools |
 | `agent/tools/seed_watchlist.py` | One-time idempotent seed/migration of Phase-1 books into Firestore |
 | `agent/tools/backfill_sales.py` | Phase 3 Spike C — eBay sold-listings scraper → Firestore `sales` (curl_cffi + session warm, heuristic + Gemini classifier; `--book`/`--book-interval`/`--classify`/`--commit`) |
