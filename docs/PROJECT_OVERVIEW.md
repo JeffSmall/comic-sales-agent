@@ -282,6 +282,7 @@ notification opens the pull path. Apple Watch glance, multi-user, and auth are a
 | **Phase 3** — Live market data | **Spike C (eBay backfill)**, then price-history tools + visualization catalog | 🚧 **In progress** |
 | **Phase 4** — Production | Cloud Run/Agent Engine deploy, auth, push notifications | 🔜 Deferred |
 | **Phase 5** — v2 features | Push subsystem, Apple Watch, multi-user | 🔜 Deferred |
+| **Phase 6** — Design & styling | Visual polish once features work: design system, Tufte data-ink doctrine, app-shell + catalog styling, app icon/launch | 🔜 Deferred |
 
 **Phase 3 / Spike C — precise current state (2026-06-11):**
 - The eBay sold-listings scraper (`agent/tools/backfill_sales.py`) is **built, validated, and

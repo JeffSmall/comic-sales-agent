@@ -228,6 +228,15 @@ right-aligned numerics, high density (sparklines, small multiples, dense matrice
   - Apple Watch glance.
   - Multi-user.
 
+- **Phase 6 — Design & styling.** 🔜 Deferred (do after the features work).
+  - Visual polish once functionality is complete — distinct from the Phase 3 viz catalog
+    (*what* widgets exist) vs. this phase (*how everything looks*).
+  - Design system: theme beyond the default seed (typography, color, spacing, dark mode).
+  - Flesh out `docs/tufte-infographics.md` (stub) into the real data-ink doctrine and apply it.
+  - App-shell polish (cards, input bar, empty/loading/error states, motion); app icon/launch.
+  - Constraint: styling flows through the catalog contract — extend the custom A2UI catalog,
+    don't hardcode looks in the app.
+
 ---
 
 ## 9. Data model (sketch — refine against the real watchlist)

@@ -55,6 +55,7 @@ This monorepo implements a two-sided AI sales agent for comics:
 | Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | ✅ COMPLETE — verified end-to-end in the iOS app (read + conversational add/remove render and persist) |
 | Phase 3 — Live market data | Spike C (historical backfill), then price-history tools + visualization catalog | 🚧 IN PROGRESS — Spike C ✅ COMPLETE (785 real grade-level sales across all 12 books in Firestore; gate met). Next: `get_price_history` tool, `refresh_sales` + "Update Sales" button, visualization catalog |
 | Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
+| Phase 5 — Design & styling | Visual polish once features work: design system (type, color, spacing, dark mode), Tufte-driven viz styling, chat-shell + A2UI component styling, app icon/launch screen | 🔜 Deferred (do after the functionality lands) |
 
 ---
 
@@ -381,6 +382,28 @@ agent surfaces price movement / grade-variance; build the visualization catalog 
 ### Phase 4 — Production (deferred)
 
 Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2UI catalog.
+
+### Phase 5 — Design & styling (deferred — do after the features work)
+
+**Goal:** Make the app look polished and cohesive once functionality is complete. This is
+distinct from the Phase 3 visualization catalog (which is about *what* data widgets exist) —
+Phase 5 is about *how everything looks*.
+
+Scope (to refine when we start):
+- **Design system:** a real theme beyond the default `deepOrange` seed — typography scale,
+  color palette, spacing/density, light + dark mode.
+- **Tufte data-ink doctrine:** flesh out `docs/tufte-infographics.md` (currently a stub) into
+  the actual visual doctrine, and apply it to the price-history / grade visualizations.
+- **App-shell polish:** chat surface cards, input bar, app bar, empty/loading/error states,
+  small motion (e.g. the auto-scroll-to-newest already added to `app/lib/main.dart`).
+- **A2UI component styling:** consistent card/row/price treatment; color-code price movement
+  (up/down) and grade tiers.
+- **App identity:** app icon, launch screen.
+
+**Invariant constraint (important):** per the repo's core rules, the app renders what the
+agent prescribes via the catalog contract — it does not invent ad-hoc styling outside the
+catalog. So a styling-heavy phase likely means **extending the (custom) A2UI catalog**, not
+hardcoding looks in the Flutter app. This ties into the custom-catalog work flagged in Phase 4.
 
 ---
 
