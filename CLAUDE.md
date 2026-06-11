@@ -53,7 +53,7 @@ This monorepo implements a two-sided AI sales agent for comics:
 |-------|-------|--------|
 | Phase 1 — Local proof of concept | Spike A (agent emits A2UI), Spike B (Flutter renders A2UI) | ✅ COMPLETE — tagged `phase1-complete` |
 | Phase 2 — Persistent watchlist | Firestore read + write tools; conversational add/edit/remove | ✅ COMPLETE — verified end-to-end in the iOS app (read + conversational add/remove render and persist) |
-| Phase 3 — Live market data | Scheduled price scraper → Firestore; agent surfaces price movement | 🔜 Deferred |
+| Phase 3 — Live market data | Spike C (historical backfill), then price-history tools + visualization catalog | 🚧 IN PROGRESS — Spike C scraper tooling built & validated; live backfill run still pending (eBay rate-limit cool-down) |
 | Phase 4 — Production | Cloud Run deploy, auth, push notifications | 🔜 Deferred |
 
 ---
@@ -285,16 +285,64 @@ identical blocks. See `app/CLAUDE.md`.
 - BasicCatalog only (no custom catalog yet)
 - No price scraping (prices are user-entered / seeded only)
 
-### Phase 3 — Live market data (deferred)
+### Phase 3 — Live market data (IN PROGRESS — Spike C)
 
-**Goal:** Automatically keep `recent_prices` and `last_sale` current without manual entry.
+**Goal:** Populate the `sales` subcollection with real ~90-day eBay sold-listing history per
+watchlist book, so the visualization catalog (Sparkline, GradeTierMatrix, SmallMultiplesGrid)
+has real grade-level data to render against. Spike C de-risks the data acquisition first.
 
-**Planned changes:**
-1. Scheduled Cloud Function (or ADK tool) that scrapes/calls a price API (e.g. GoCollect,
-   GPAnalysis) for each comic in the user's Firestore watchlist
-2. Writes updated price data back to Firestore on a schedule (daily or weekly)
-3. Agent reads the freshened data via the existing read tool — no agent changes needed
-4. Agent A2UI responses can surface price movement (e.g. "up $1,500 since last week")
+**Status:** scraper tooling **built and validated**; the **live backfill run is still pending**
+an eBay rate-limit cool-down (see below). The `sales` subcollection is currently empty (the old
+Phase-1/2 seed sales for Amazing Fantasy #15 / Incredible Hulk #1 were removed during watchlist
+edits). **The Spike C gate (≥3 books with real grade-level sales) is NOT yet met.**
+
+**What was built — `agent/tools/backfill_sales.py`** (mirrors `seed_watchlist.py`: reads the
+watchlist from Firestore, writes `sales/{saleId}` docs directly; `--dry-run` by default,
+`--commit` to persist; idempotent via deterministic `ebay-<itemId>` ids):
+
+- **Source = direct eBay sold-listings scrape** (decided over the official eBay API and paid
+  comic APIs). Rationale: the Finding API (`findCompletedItems`) was **decommissioned Feb 2025**;
+  the Browse API returns active listings only; **Marketplace Insights** (the only official sold
+  API) is a gated Limited Release AND caps at 90 days. So for a fast spike, scraping won.
+- **eBay blocks plain HTTP at the TLS layer** (Akamai) — a normal `requests`/`curl` gets a 403
+  error page regardless of headers/IP. **Fix:** `curl_cffi` impersonating Chrome's TLS/HTTP2
+  fingerprint, **plus warming the session** by fetching `ebay.com` first (seeds the bot-manager
+  cookies `bm_ss`/`bm_so`/`__uzm*`). Then the sold-search returns HTTP 200 + ~1.3MB real HTML.
+- **eBay rate-limits on request VELOCITY** (Imperva "Pardon Our Interruption" interstitial).
+  Tripped after ~3 full scrapes in minutes; a pure HTTP client **cannot** solve the JS challenge,
+  re-warming the same IP doesn't clear it — only a **cool-down** (15–30 min, longer on repeat
+  trips) does. The script detects the hard challenge and **aborts cleanly** rather than hammering.
+- **Mitigation (the prototype's approach): manual, low-rate, per-book.** `--book <id>` scrapes one
+  book (~2 requests); `--book-interval <sec>` (default 900) spaces a multi-book sweep. One book per
+  ~15 min stays under the velocity threshold. Run by hand, on-demand, in a daytime window.
+- **RESIDENTIAL IP is load-bearing.** The scrape only works from a home connection; a GCP/Cloud
+  Run datacenter IP would be blocked by Imperva. **This reshapes the Phase 4 cloud-scraper plan** —
+  for eBay, local scheduling (or a residential proxy / paid comic API) is required, not Cloud Run.
+- **Parsing:** current eBay layout is `.s-card` (not the old `.s-item`). Extracts title, price,
+  sold date, listing URL. Per-sale `grade` regex (allows `.2/.4/.6/.8`) and a nullable
+  **`edition`** field (`newsstand`/`direct`/null — a small extension beyond CPCD §9, detected from
+  explicit title wording only; never assumed).
+- **Precision is the hard part (CPCD flagged it).** Two-stage filter: (1) cheap heuristic —
+  contiguous `title+issue` normalized match + a reject list (facsimile/reprint/lot/merch) — strips
+  wrong-series junk; (2) optional **Gemini classifier** (`--classify`, `gemini-2.5-flash`, batched,
+  fails OPEN) drops the residue heuristics can't catch: homage/variant covers and reprints that
+  print the key's name in their own title. Validated **15/15** offline on real captured titles.
+- **Deps:** `curl_cffi`, `beautifulsoup4`, `lxml` live in the `[backfill]` optional extra
+  (`uv sync --extra backfill`), kept out of the deployed agent runtime. `google-genai` (for
+  `--classify`) is already an agent dep. The script auto-loads `agent/.env`.
+
+**Run recipes** (`cd agent && source .venv/bin/activate`; deps now in the venv, no `--with`):
+```
+# validate one book live (dry-run, no writes):
+python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1
+# commit one book (run per book, spaced out — the manual drip):
+python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 --commit
+# or one paced sweep of all books (~15 min/book):
+python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit
+```
+
+**Remaining after the backfill lands:** `get_price_history(bookId, days, grade?)` tool;
+agent surfaces price movement / grade-variance; build the visualization catalog items.
 
 ### Phase 4 — Production (deferred)
 
@@ -311,10 +359,11 @@ Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2U
 | `agent/comic_sales/tools/watchlist.py` | ADK function tools: `get_watchlist`, `upsert_comic`, `remove_comic`, `add_sale` |
 | `agent/comic_sales/tools/__init__.py` | Exports the watchlist tools |
 | `agent/tools/seed_watchlist.py` | One-time idempotent seed/migration of Phase-1 books into Firestore |
+| `agent/tools/backfill_sales.py` | Phase 3 Spike C — eBay sold-listings scraper → Firestore `sales` (curl_cffi + session warm, heuristic + Gemini classifier; `--book`/`--book-interval`/`--classify`/`--commit`) |
 | `agent/comic_sales/agent.json` | A2A agent card — required by `adk api_server --a2a` |
 | `agent/comic_sales/__init__.py` | Makes `comic_sales` a Python package |
 | `agent/.env` | `GOOGLE_API_KEY=...`, `FIRESTORE_PROJECT=comic-sales-agent` — gitignored |
-| `agent/pyproject.toml` | Python deps via uv — `google-adk`, `a2ui-agent-sdk`, `a2a-sdk[http-server]`, `google-cloud-firestore` |
+| `agent/pyproject.toml` | Python deps via uv — `google-adk`, `a2ui-agent-sdk`, `a2a-sdk[http-server]`, `google-cloud-firestore`; `[backfill]` extra (curl-cffi, beautifulsoup4, lxml) for Spike C |
 | `app/lib/main.dart` | Full Flutter app — GenUI wiring, fallback A2UI parser, chat UI |
 | `app/pubspec.yaml` | Flutter deps — genui 0.9.2, genui_a2a 0.9.0, a2a 4.2.0, logging |
 | `CLAUDE.md` | This file |

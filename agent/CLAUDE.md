@@ -19,7 +19,8 @@ agent/
 │     ├─ __init__.py
 │     └─ watchlist.py     # ADK function tools: get_watchlist, upsert_comic, remove_comic, add_sale
 ├─ tools/
-│  └─ seed_watchlist.py   # One-time idempotent seed/migration of Phase-1 books → Firestore
+│  ├─ seed_watchlist.py   # One-time idempotent seed/migration of Phase-1 books → Firestore
+│  └─ backfill_sales.py   # Phase 3 Spike C — eBay sold-listings scraper → Firestore sales
 ├─ .env                   # GOOGLE_API_KEY=..., FIRESTORE_PROJECT=... (gitignored)
 ├─ pyproject.toml         # Python deps managed by uv
 └─ .venv/                 # Virtual environment (gitignored)
@@ -45,6 +46,8 @@ Managed by `uv` (not pip). Key packages:
 - `a2ui-agent-sdk` (provides `A2uiSchemaManager`, `BasicCatalog`)
 - `a2a-sdk[http-server]==0.3.6` (required by `adk api_server --a2a`)
 - `google-cloud-firestore` (Phase 2 — watchlist persistence)
+- `[backfill]` extra: `curl-cffi`, `beautifulsoup4`, `lxml` (Phase 3 Spike C scraper —
+  `uv sync --extra backfill`; kept out of the deployed runtime)
 
 To install: `uv sync`
 
@@ -150,4 +153,48 @@ Seed/migrate Phase-1 data once (deterministic ids, safe to re-run):
 ```bash
 cd agent && source .venv/bin/activate
 FIRESTORE_PROJECT=comic-sales-agent python tools/seed_watchlist.py
+```
+
+## Phase 3 Spike C — eBay sold-listings backfill (`tools/backfill_sales.py`)
+
+A standalone scraper that fills each watchlist book's `sales/{saleId}` subcollection with real
+~90-day eBay completed-sale history, so the Phase 3 visualization catalog has grade-level data.
+Same shape as the seed script (reads the watchlist, writes `sales` docs, idempotent via
+deterministic `ebay-<itemId>` ids), `--dry-run` by default / `--commit` to persist.
+
+**Status: tooling built & validated; the live `--commit` run is still pending an eBay
+rate-limit cool-down. The `sales` subcollection is empty — the Spike C gate is not yet met.**
+
+**How it gets past eBay (the de-risked unknowns):**
+- Plain HTTP is blocked at the **TLS layer** (Akamai) → 403. Fix: **`curl_cffi` impersonating
+  Chrome** + **warm the session** (GET `ebay.com` first to seed `bm_*`/`__uzm*` bot cookies),
+  then the sold-search returns 200. See `EbayClient` in the script.
+- eBay then rate-limits on **request velocity** → Imperva **"Pardon Our Interruption"** challenge,
+  which a pure HTTP client can't solve and re-warming won't clear — only a **cool-down** (15–30
+  min, longer on repeat trips). The client detects it (`EbayBlockedError`) and aborts cleanly.
+- **Stay low-rate, manual:** `--book <id>` = one book (~2 requests); `--book-interval` spaces a
+  sweep (default 900s). One book per ~15 min stays under the threshold.
+- **Residential IP is essential** — a Cloud Run / datacenter IP gets blocked. Don't move this
+  scraper to Cloud Run without a residential proxy (revisits the Phase 4 plan).
+
+**Precision (the genuinely hard part):** two stages — a cheap heuristic (contiguous `title+issue`
+normalized match + reject list for facsimile/reprint/lot/merch) strips wrong-series junk, then an
+optional **Gemini classifier** (`--classify`) drops homage/variant/reprint listings that print the
+key's name in their own title. Classifier batches titles, runs `gemini-2.5-flash` with
+thinking off, and **fails open** (keeps a borderline rather than dropping a real sale). Validated
+15/15 on real captured titles.
+
+**Schema note:** adds a nullable **`edition`** (`newsstand`/`direct`/null) to each sale doc — a
+small, additive extension beyond CPCD §9 to support edition-level price analysis.
+
+**Deps:** `curl_cffi`, `beautifulsoup4`, `lxml` are in the `[backfill]` extra — install with
+`uv sync --extra backfill` (lost on a clean rebuild; re-run after recreating the venv).
+`google-genai` (for `--classify`) is already an agent dep. The script auto-loads `agent/.env`,
+so no inline `FIRESTORE_PROJECT=` / `GOOGLE_API_KEY=` is needed.
+
+```bash
+cd agent && source .venv/bin/activate
+python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1            # dry-run one book
+python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 --commit   # persist one book
+python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit     # paced full sweep
 ```
