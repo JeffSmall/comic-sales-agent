@@ -187,6 +187,19 @@ thinking off, and **fails open** (keeps a borderline rather than dropping a real
 **Schema note:** adds a nullable **`edition`** (`newsstand`/`direct`/null) to each sale doc — a
 small, additive extension beyond CPCD §9 to support edition-level price analysis.
 
+**Incremental refresh (`--incremental`):** after the first 90-day backfill, this mode scrapes each
+book only since `(newest stored sale_date − 2d)` — the stored sales are the high-water mark, so
+irregular run intervals never leave a gap and idempotent ids make the overlap free. No prior
+sales ⇒ full `--days` fallback; gaps beyond eBay's ~90-day retention are unrecoverable. See
+`_effective_days` / `_newest_sale_date`. (Pacing is unchanged, so a full 12-book incremental
+sweep is still ~3 hrs of mostly-waiting — a background job, not a quick task.)
+
+**Planned `refresh_sales` agent tool + app button (after the backfill lands):** an "Update Sales"
+button in the Flutter app fires a NON-BLOCKING ADK tool that launches the scraper as a detached,
+`caffeinate -i`-wrapped background process (idle system sleep would otherwise suspend a multi-hour
+run; screensaver/display sleep do not). A synchronous multi-hour tool call would time out the A2A
+turn, so it must return immediately. Only works while the agent runs locally (residential IP).
+
 **Deps:** `curl_cffi`, `beautifulsoup4`, `lxml` are in the `[backfill]` extra — install with
 `uv sync --extra backfill` (lost on a clean rebuild; re-run after recreating the venv).
 `google-genai` (for `--classify`) is already an agent dep. The script auto-loads `agent/.env`,

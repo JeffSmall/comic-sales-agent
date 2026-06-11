@@ -45,8 +45,12 @@ min apart. Two ways to drive it:
   Paced sweep (one long-running process; sleeps --book-interval between books):
     python tools/backfill_sales.py --classify --book-interval 900 --commit
 
-After the first 90-day backfill, keep data fresh with small incremental runs (--days 7);
-deterministic ebay-<itemId> ids mean overlapping windows upsert rather than duplicate.
+After the first 90-day backfill, keep data fresh with --incremental: per book it scrapes only
+since (newest stored sale - 2d), so running at irregular intervals (skip a day, a week) never
+leaves a gap, and deterministic ebay-<itemId> ids make the overlap free (upsert, not dupe).
+Books with no prior sales fall back to the full --days window; gaps beyond eBay's ~90-day
+retention can't be recovered.
+    python tools/backfill_sales.py --classify --incremental --book new-mutants-98 --commit
 
 Dry-run prints what it WOULD write and touches nothing; .env is auto-loaded. Use
 --book-interval 0 for a quick multi-book dry-run without the 15-min waits:
@@ -69,10 +73,17 @@ from datetime import datetime, timedelta, timezone
 # Allow running as a plain script: make the comic_sales package importable.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from google.cloud import firestore  # noqa: E402
+
 from comic_sales.firestore_client import db  # noqa: E402
 
 _WATCHLIST = "watchlist"
 _SALES = "sales"
+
+# Incremental mode: re-scrape from a few days before the newest sale we already have, so
+# irregular run intervals never leave a gap, and idempotent ids make the overlap free.
+_INCREMENTAL_OVERLAP_DAYS = 2
+_EBAY_RETENTION_DAYS = 90  # eBay keeps ~90 days of sold listings; older gaps are unrecoverable
 
 _EBAY_HOME = "https://www.ebay.com"
 _EBAY_SEARCH = "https://www.ebay.com/sch/i.html"
@@ -519,6 +530,41 @@ def scrape_book(client: EbayClient, title: str, issue: str, days: int, max_pages
     return sorted(by_id.values(), key=lambda s: s.sale_date)
 
 
+def _newest_sale_date(book_ref) -> datetime | None:
+    """The most recent stored sale_date for a book — the incremental high-water mark."""
+    docs = list(
+        book_ref.collection(_SALES)
+        .order_by("sale_date", direction=firestore.Query.DESCENDING)
+        .limit(1)
+        .stream()
+    )
+    if not docs:
+        return None
+    d = (docs[0].to_dict() or {}).get("sale_date")
+    return d if isinstance(d, datetime) else None
+
+
+def _effective_days(book_ref, fallback_days: int, incremental: bool) -> tuple[int, str]:
+    """Decide how many days back to scrape for one book.
+
+    Fixed-window mode returns `fallback_days`. Incremental mode reaches back to a couple of
+    days before the newest sale we already stored (so irregular run gaps are covered, and
+    idempotent ids make the overlap free), clamped to eBay's ~90-day retention; a book with
+    no prior sales falls back to the full window.
+    """
+    if not incremental:
+        return fallback_days, f"{fallback_days}d window"
+    newest = _newest_sale_date(book_ref)
+    if newest is None:
+        return fallback_days, f"full {fallback_days}d (no prior sales)"
+    gap_days = (datetime.now(timezone.utc) - newest).days + _INCREMENTAL_OVERLAP_DAYS
+    days = max(1, min(gap_days, _EBAY_RETENTION_DAYS))
+    note = f"incremental since {newest:%Y-%m-%d} (~{days}d)"
+    if gap_days > _EBAY_RETENTION_DAYS:
+        note += " — gap exceeds eBay's 90d retention; older sales unrecoverable"
+    return days, note
+
+
 def _write_sales(book_ref, sales: list[Sale]) -> int:
     written = 0
     for s in sales:
@@ -557,7 +603,12 @@ def main() -> None:
     parser.add_argument("--commit", action="store_true",
                         help="Write to Firestore. Without this flag the script is a dry run.")
     parser.add_argument("--days", type=int, default=90,
-                        help="How many days of sold history to capture (default 90).")
+                        help="Days of sold history to capture (default 90). In --incremental "
+                             "mode this is the fallback window for books with no prior sales.")
+    parser.add_argument("--incremental", action="store_true",
+                        help="Per book, scrape only since (newest stored sale - 2d), so "
+                             "irregular run intervals leave no gap. Books with no sales yet "
+                             "fall back to the full --days window. Ideal for routine refreshes.")
     parser.add_argument("--max-pages", type=int, default=4,
                         help="Max result pages to fetch per book (default 4).")
     parser.add_argument("--sample", type=int, default=8,
@@ -577,8 +628,9 @@ def main() -> None:
     _load_dotenv()  # make GOOGLE_API_KEY / FIRESTORE_PROJECT available to the standalone script
 
     mode = "COMMIT — writing to Firestore" if args.commit else "DRY RUN — no writes"
+    window = "incremental (since last scrape)" if args.incremental else f"last {args.days} days"
     extra = " | Gemini classifier ON" if args.classify else ""
-    print(f"eBay sold-listings backfill | {mode} | last {args.days} days{extra}\n")
+    print(f"eBay sold-listings backfill | {mode} | {window}{extra}\n")
 
     fs = db()
     books = list(fs.collection(_WATCHLIST).stream())
@@ -608,9 +660,10 @@ def main() -> None:
             client.warm()  # fresh session per book
         data = doc.to_dict() or {}
         title, issue = data.get("title", ""), data.get("issue", "")
-        print(f"• {title} {issue}  (book_id={doc.id})")
+        days, window_note = _effective_days(doc.reference, args.days, args.incremental)
+        print(f"• {title} {issue}  (book_id={doc.id})  [{window_note}]")
         try:
-            sales = scrape_book(client, title, issue, args.days, args.max_pages)
+            sales = scrape_book(client, title, issue, days, args.max_pages)
         except EbayBlockedError as exc:
             # The IP is flagged — every remaining book would hit the same wall. Stop cleanly.
             print(f"    BLOCKED: {exc}\n\nAborting run. Re-run after the cool-down.")

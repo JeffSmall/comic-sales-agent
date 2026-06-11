@@ -341,8 +341,28 @@ python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 --
 python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit
 ```
 
+**Incremental refresh (`--incremental`) — the routine-maintenance mode.** After the first
+90-day backfill, `--incremental` scrapes each book only since `(newest stored sale_date − 2d)`.
+The stored sales ARE the high-water mark, so running at irregular intervals (skip a day, a week)
+never leaves a gap; idempotent `ebay-<itemId>` ids make the safety overlap free. A book with no
+sales yet falls back to the full `--days` window; a gap beyond eBay's ~90-day retention can't be
+recovered. NOTE: pacing (anti-rate-limit) is the same regardless of window, so a full 12-book
+incremental sweep is still ~3 hrs of wall-clock (mostly the deliberate 15-min gaps) — it's a
+background job, not a watch-it-finish task. A few priority books is ~30 min.
+
+**Planned: app-triggered refresh (build AFTER the backfill lands).** An "Update Sales" button in
+the Flutter app sends a message that fires a non-blocking ADK tool `refresh_sales(days, book_id?)`,
+which launches the scraper as a detached, `caffeinate`-wrapped background process and returns
+immediately ("started; ~M min in the background"). Key constraints discovered:
+- Must be **non-blocking** — a multi-hour synchronous tool call would time out the A2A turn.
+- Wrap in macOS **`caffeinate -i`** so idle system sleep doesn't suspend the run mid-scrape
+  (screensaver / display sleep do NOT affect a running process — only full system sleep does).
+- **Only works while the agent runs locally** (residential IP). A Cloud Run agent can't run a
+  local scraper, so the scraper stays a local component even after Phase 4 deploys the agent.
+
 **Remaining after the backfill lands:** `get_price_history(bookId, days, grade?)` tool;
-agent surfaces price movement / grade-variance; build the visualization catalog items.
+`refresh_sales` tool + "Update Sales" button; agent surfaces price movement / grade-variance;
+build the visualization catalog items.
 
 ### Phase 4 — Production (deferred)
 

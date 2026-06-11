@@ -5,8 +5,8 @@
 > else in the Claude Project hangs off it. When a decision changes, update the relevant
 > section and the ADR log — don't bury the change in a chat.
 
-**Status:** Phase 2 COMPLETE — Firestore-backed watchlist verified end-to-end in the iOS app (read + conversational add/remove). Phase 3 next.
-**Last updated:** 2026-06-09
+**Status:** Phase 3 IN PROGRESS — Spike C eBay scraper (`agent/tools/backfill_sales.py`) built & validated (curl_cffi + session-warming fetch, heuristic + Gemini-classifier precision, `--incremental` refresh); live backfill run pending an eBay rate-limit cool-down, so Firestore `sales` is still empty and the Spike C gate is not yet met. (Phase 2 complete — Firestore watchlist verified end-to-end in the iOS app.)
+**Last updated:** 2026-06-11
 **Primary machine:** Personal MacBook Air M4 (direct Anthropic connection — avoids the Portkey beta-flag issue)
 
 ---
@@ -186,23 +186,32 @@ right-aligned numerics, high density (sparklines, small multiples, dense matrice
   - Build `WatchlistRow` catalog item (data-driven; basic card already proven in Phase 1).
   - Single hardcoded user ID; no auth yet.
 
-- **Phase 3 — Price history, visualization catalog, and scraper.** 🔜 Deferred.
+- **Phase 3 — Price history, visualization catalog, and scraper.** 🚧 IN PROGRESS.
   - **This is where the trend/grade analysis feature lives.**
 
-  - **Spike C — Historical backfill (do this first, before building any visualization):**
-    - One-time Python script (`tools/backfill_sales.py`) that scrapes ~6 months of completed
-      sale data from eBay (and any other target platforms) for every book in the watchlist.
-    - Writes each sale as a `sales/{saleId}` document with `grade`, `price`, `sale_date`,
-      `source`, `url` (see §9 schema).
-    - Run once locally before starting visualization work. This gives the catalog items real
-      data to render against from day one instead of waiting weeks for the live scraper.
-    - Gate: Firestore contains ≥6 months of grade-level sales for at least 3 watchlist books.
-    - **Why a spike:** scraping eBay completed listings reliably enough to get clean
-      grade/price pairs is non-trivial (parsing titles, deduplication, handling variants).
-      De-risk it in isolation before the visualization work depends on it.
+  - **Spike C — Historical backfill.** 🚧 Tooling built & validated; live backfill run pending
+    an eBay rate-limit cool-down (Firestore `sales` currently empty — gate NOT yet met).
+    - Script `agent/tools/backfill_sales.py` scrapes completed eBay sales for every watchlist
+      book and writes each as a `sales/{saleId}` doc with `grade`, `price`, `sale_date`,
+      `source`, `url`, and a nullable `edition` (newsstand/direct). See root/agent `CLAUDE.md`.
+    - **Window is ~90 days, not 6 months** (revised): eBay public sold listings only retain
+      ~90 days, and the official APIs that reach further are gated/decommissioned (Finding API
+      dead Feb 2025; Marketplace Insights is a 90-day-capped Limited Release). We scrape the
+      real ~90-day window rather than synthesize older data.
+    - **Gate (revised): Firestore contains ~90 days of grade-level eBay sales for ≥3 books.**
+    - **Why a spike (confirmed hard):** eBay blocks plain HTTP at the TLS layer (Akamai) and
+      rate-limits on velocity (Imperva). Solved with curl_cffi + homepage session-warming, a
+      contiguous title+issue heuristic, and a Gemini title classifier for homage/variant/reprint
+      precision. The scrape depends on a **residential IP** — a datacenter/Cloud Run IP is blocked.
 
-  - Ongoing scraper writes new sale events to `sales/{saleId}` per comic **per grade** (not a
-    flat array — see §9). Source: eBay completed listings + any additional platforms.
+  - **Ongoing refresh = the same script in `--incremental` mode, run manually/on-demand** (not a
+    cloud cron). Per book it scrapes only since `(newest stored sale − 2d)`, so irregular run
+    intervals leave no gap; idempotent `ebay-<itemId>` ids make overlap free. Low-rate pacing
+    (~1 book / 15 min) keeps it under eBay's limit, so a full sweep is a ~3-hr background job.
+  - **Planned: app-triggered refresh.** An "Update Sales" button in the Flutter app fires a
+    non-blocking `refresh_sales` ADK tool that launches the scraper as a detached,
+    `caffeinate`-wrapped background process (residential IP ⇒ agent must run locally). This is a
+    manual trigger of the pull-path refresh, distinct from the §3.2 proactive/push path.
   - Agent gains a `get_price_history(bookId, days, grade?)` tool querying the sales subcollection.
   - Agent surfaces trend analysis: e.g. "Higher graded copies are in less demand than lower graded
     copies right now" — backed by grade-level sales data.
@@ -278,11 +287,16 @@ document with `grade` populated.
       sketch (`watchlist/{userId}/comics/{comicId}` + flat `recent_prices`) was **superseded** by
       this §9 model and corrected in that file.
 - [ ] GenUI alpha breakage: `genui_a2a 0.9.0` has two known bugs (patched — see CLAUDE.md).
-- [ ] Phase 3 visualization: which price data source for the scraper? eBay completed listings
-      confirmed as the source. Need to decide on scraping approach (direct or via an API).
-- [ ] Phase 3 visualization: what time window is "enough" data to show meaningful trends?
-      30/60/90 days requires the scraper to have been running long enough. Consider seeding
-      historical data from the existing Python tracker for initial Phase 3 testing.
+- [x] Phase 3 scraper data source & approach: **direct eBay sold-listings HTML scrape** (not an
+      API). Official eBay APIs are out — Finding API decommissioned Feb 2025; Browse API is
+      active-listings-only; Marketplace Insights is a gated, 90-day-capped Limited Release. The
+      "existing Python tracker" from §3.3 was never in this repo and is unavailable, so the
+      scraper is built fresh (`agent/tools/backfill_sales.py`). See Phase 3 in §8 / `CLAUDE.md`.
+- [x] Phase 3 data window: **~90 days** — the limit of eBay's public sold-listing retention. No
+      synthesizing older data; real history accrues forward via `--incremental` refreshes.
+- [ ] Phase 3 scraper IP dependency: the scrape needs a **residential IP** (Imperva blocks
+      datacenter IPs). This conflicts with the §3.2 Cloud Run scraper plan — production would need
+      a residential proxy or a paid comic API. Local execution is fine for the prototype.
 - [ ] `GradeTierMatrix` and `SmallMultiplesGrid` are custom catalog items — they require
       building custom Flutter widgets and registering them with the GenUI catalog. This is
       Phase 3 work and is the first time we go beyond `BasicCatalog`.
