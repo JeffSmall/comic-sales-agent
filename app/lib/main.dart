@@ -62,6 +62,7 @@ class _ChatPageState extends State<ChatPage> {
   late final Conversation _conversation;
 
   final TextEditingController _textCtrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
   bool _sending = false;
 
   // Accumulates raw text from textStream so we can extract A2UI blocks after
@@ -107,6 +108,12 @@ class _ChatPageState extends State<ChatPage> {
     _connector.errorStream.listen(
       (e) => debugPrint('[A2UI] connector error: $e'),
     );
+    // The agent emits a separate surface per query type (watchlist_surface,
+    // price_history_surface, …), and they accumulate/stack in the ListView. As
+    // content arrives, auto-scroll so the newest surface is brought into view
+    // instead of rendering off-screen below the fold.
+    _conversation.state.addListener(_scrollToNewest);
+
     _conversation.events.listen((event) {
       if (event is ConversationError) {
         debugPrint('[Conversation] ERROR: ${event.error}');
@@ -118,6 +125,21 @@ class _ChatPageState extends State<ChatPage> {
       } else {
         debugPrint('[Conversation] event: ${event.runtimeType}');
       }
+    });
+  }
+
+  // Animate the surface list to the bottom so freshly-rendered content is
+  // visible. Runs after the frame so maxScrollExtent reflects the new layout;
+  // GenUI builds the surface tree over several frames, and ConversationState
+  // notifies on each ComponentsUpdated, so this re-fires until height settles.
+  void _scrollToNewest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -190,11 +212,13 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _conversation.state.removeListener(_scrollToNewest);
     _conversation.dispose();
     _transport.dispose();
     _surfaceController.dispose();
     _connector.dispose();
     _textCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -235,7 +259,10 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
                 return ListView(
-                  padding: const EdgeInsets.all(16),
+                  controller: _scrollCtrl,
+                  // Extra bottom padding so the last card clears the input bar
+                  // and isn't visually crowded against the footer divider.
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                   children: [
                     for (final surfaceId in state.surfaces)
                       Surface(
