@@ -73,9 +73,20 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
 
-    // 1. Surface controller backed by the BasicCatalog
+    // 1. Surface controller backed by the BasicCatalog.
+    // The agent's createSurface catalogId is non-deterministic: it sometimes emits the
+    // SDK-default "…/v0_9/catalogs/basic/catalog.json" instead of BasicCatalog's real
+    // "…/v0_9/basic_catalog.json", which makes the surface fail with "Catalog … not found".
+    // Register the same catalog under BOTH ids so it resolves regardless of which the model uses.
+    final basicCatalog = BasicCatalogItems.asCatalog();
     _surfaceController = SurfaceController(
-      catalogs: [BasicCatalogItems.asCatalog()],
+      catalogs: [
+        basicCatalog,
+        basicCatalog.copyWith(
+          catalogId:
+              'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
+        ),
+      ],
     );
 
     // 2. Transport adapter — bridges connector output → surface controller
@@ -112,7 +123,7 @@ class _ChatPageState extends State<ChatPage> {
     // price_history_surface, …), and they accumulate/stack in the ListView. As
     // content arrives, auto-scroll so the newest surface is brought into view
     // instead of rendering off-screen below the fold.
-    _conversation.state.addListener(_scrollToNewest);
+    _conversation.state.addListener(_scrollToTop);
 
     _conversation.events.listen((event) {
       if (event is ConversationError) {
@@ -128,23 +139,62 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  // Animate the surface list to the bottom so freshly-rendered content is
-  // visible. Runs after the frame so maxScrollExtent reflects the new layout;
-  // GenUI builds the surface tree over several frames, and ConversationState
-  // notifies on each ComponentsUpdated, so this re-fires until height settles.
-  void _scrollToNewest() {
+  // Drill-in navigation re-renders the single "comic_surface" in place, so each new view
+  // (watchlist, or a book detail with its "← Watchlist" back button + header at the top)
+  // should land scrolled to the TOP — otherwise a retained scroll offset hides the header.
+  // Runs after the frame since GenUI builds the surface tree over several frames and
+  // ConversationState notifies on each update.
+  void _scrollToTop() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollCtrl.hasClients) return;
       _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
+        0,
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
     });
   }
 
+  // Translate a tapped GenUI action into the proven text path. A Button tap arrives as a
+  // ChatMessage carrying a UiInteractionPart; the connector would serialize it as an A2A
+  // DataPart, which this stack has never reliably delivered to the agent (A2UI has only ever
+  // flowed as text). So we map the action to an equivalent natural-language request and send
+  // that instead. The book_id is encoded in the action name (e.g. "view_book:amazing-fantasy-15")
+  // to avoid the data-context resolution path. Typed messages (a TextPart, no interaction part)
+  // pass through unchanged.
+  ChatMessage _bridgeActionToText(ChatMessage message) {
+    for (final part in message.parts) {
+      if (!part.isUiInteractionPart) continue;
+      try {
+        final decoded =
+            jsonDecode(part.asUiInteractionPart!.interaction) as Map;
+        final action = decoded['action'] as Map?;
+        final name = action?['name'] as String?;
+        final text = _actionToText(name);
+        if (text != null) {
+          debugPrint('[action bridge] $name -> "$text"');
+          return ChatMessageFactories.userText(text);
+        }
+      } catch (e) {
+        debugPrint('[action bridge] parse error: $e');
+      }
+    }
+    return message;
+  }
+
+  String? _actionToText(String? name) {
+    if (name == null) return null;
+    if (name == 'view_watchlist') return 'show me my watchlist';
+    if (name.startsWith('view_book:')) {
+      final id = name.substring('view_book:'.length);
+      return 'show price history and details for book_id $id';
+    }
+    return null;
+  }
+
   Future<void> _sendToAgent(ChatMessage message) async {
     _responseBuffer.clear();
+    message = _bridgeActionToText(message);
     String? responseText;
     try {
       responseText = await _connector.connectAndSend(message);
@@ -181,12 +231,12 @@ class _ChatPageState extends State<ChatPage> {
       // e.g. as both a message and an artifact).
       if (!seen.add(jsonStr)) continue;
       try {
-        final decoded = jsonDecode(jsonStr);
+        final decoded = _tolerantJsonDecode(jsonStr);
         if (decoded is! Map) {
           debugPrint('[A2UI fallback] decoded JSON is not a Map: $decoded');
           continue;
         }
-        final jsonMap = Map<String, Object?>.from(decoded as Map);
+        final jsonMap = Map<String, Object?>.from(decoded);
         debugPrint(
           '[A2UI fallback] injecting block ${found + 1}: '
           '${jsonMap.keys.toList()}',
@@ -210,9 +260,64 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  // Decode A2UI JSON, tolerating the model occasionally dropping trailing
+  // closers. gemini-2.5-flash intermittently emits the A2UI block missing its
+  // final "}" (or "]") — small payloads, just an unbalanced tail — which would
+  // otherwise blank the surface. On failure, re-balance the unclosed brackets
+  // (tracking string literals/escapes so braces inside text aren't counted) and
+  // retry once. Returns null if it still can't parse.
+  Object? _tolerantJsonDecode(String s) {
+    try {
+      return jsonDecode(s);
+    } catch (_) {
+      final repaired = _balanceBrackets(s);
+      if (repaired == s) rethrow;
+      final result = jsonDecode(repaired);
+      debugPrint(
+        '[A2UI fallback] repaired truncated JSON (+${repaired.length - s.length} closer(s))',
+      );
+      return result;
+    }
+  }
+
+  // Append the closers needed to balance any '{'/'[' left open at the end of [s],
+  // in correct nesting order. Ignores brackets inside string literals.
+  String _balanceBrackets(String s) {
+    final stack = <String>[];
+    var inStr = false, esc = false;
+    for (final unit in s.codeUnits) {
+      final ch = String.fromCharCode(unit);
+      if (inStr) {
+        if (esc) {
+          esc = false;
+        } else if (ch == r'\') {
+          esc = true;
+        } else if (ch == '"') {
+          inStr = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inStr = true;
+      } else if (ch == '{' || ch == '[') {
+        stack.add(ch);
+      } else if (ch == '}') {
+        if (stack.isNotEmpty && stack.last == '{') stack.removeLast();
+      } else if (ch == ']') {
+        if (stack.isNotEmpty && stack.last == '[') stack.removeLast();
+      }
+    }
+    if (stack.isEmpty) return s;
+    final sb = StringBuffer(s);
+    for (var i = stack.length - 1; i >= 0; i--) {
+      sb.write(stack[i] == '{' ? '}' : ']');
+    }
+    return sb.toString();
+  }
+
   @override
   void dispose() {
-    _conversation.state.removeListener(_scrollToNewest);
+    _conversation.state.removeListener(_scrollToTop);
     _conversation.dispose();
     _transport.dispose();
     _surfaceController.dispose();
