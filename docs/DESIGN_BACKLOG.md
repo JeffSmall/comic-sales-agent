@@ -21,6 +21,53 @@
 | D4 | **Lean rendering: single Text lines in a Column; avoid Row/Card/nesting.** | 2026-06-11 | Forced by the a2a ~9 KB SSE truncation + gemini malformed-JSON. Trades rich layout for reliability until the transport limit is lifted (see backlog). |
 | D5 | **Encode action args in the action NAME** (`view_book:<id>`), app bridges action→text. | 2026-06-11 | Avoids BasicCatalog data-context resolution AND the unproven DataPart→agent path. |
 | D6 | **The watchlist IS the home screen.** App auto-loads it on launch (no prompt); agent renders a welcome/empty view when there are zero comics. | 2026-06-12 | App can't detect "empty" itself (only sees A2UI), so the agent owns the empty-state branch — keeps the invariant. |
+| D7 | **Product name = "Comic Sales Agent."** | 2026-06-12 | Stitch's "PanelAsset" was an artifact — ignore it. |
+| D8 | **Fair Market Value (FMV) ≡ median price.** Use interchangeably. | 2026-06-12 | No separate FMV model; "FMV" is just the window median. |
+| D9 | **No separate Market Trends screen — Book Detail IS the dynamic market view.** Merge the trend chart + grade-variance into Book Detail. | 2026-06-12 | Keeps nav clean/dedicated: Dashboard ⇄ Book Detail → back → next book. `screen_market_trends.png` deleted. |
+| D10 | **Dashboard footer = two tap icons:** left **gear "Settings"** → manage (add/remove) comics conversationally; right **"$" dollar** → Update Sales. Remove the top-bar "Update Sales" button. | 2026-06-12 | Replaces Stitch's unclear footer icons; moves Update Sales off the top bar. (Note: gear conventionally reads "settings" — confirm it reads as "manage watchlist.") |
+| D11 | **Watchlist limit = 12 books.** | 2026-06-12 | Also keeps renders within the lean payload budget. |
+
+---
+
+## Accepted visual direction — Stitch v1 ("Ink & Equity")
+
+Source: `docs/design/stitch-v1/` (`DESIGN.md` + screenshots). Reviewed 2026-06-12; strong fit to the
+PRD's Tufte/financial-broadsheet doctrine. Accepted as the working design direction.
+
+**Design system (leading candidate — confirm to lock as theme of record):** bone surface `#F9F7F2`,
+charcoal text `#1A1B1C`, graphite metadata `#5E6266`, terracotta accent `#BD472A`, muted semantic
+`market-up #2D7A4D` / `market-down #C9302C`; **Inter** with **tabular + lining figures** (numerics
+align); flat (no shadows/borders, negative space as divider); **sharp 0px corners** for data
+containers (2px only on input/buttons); right-aligned numerics. Maps cleanly to a Flutter `ThemeData`
++ the custom catalog.
+
+**Screens (target):**
+- **Dashboard (home).** List of tappable watchlist rows: title (strong) + publisher + grade badge
+  left; large tabular price + ▲/▼ delta right. Sort chips (Value / Mover / Grade / Recent / Year).
+  Footer = gear (manage) + "$" (Update Sales) per D10. Tap a row → Book Detail.
+- **Welcome / first run.** As built (D6): headline + "not tracking any comics yet" + INPUT GUIDANCE
+  example card + a visible text field to add the first comic.
+- **Book Detail (merged — absorbs Market Trends, per D9).** Top→bottom: back (← Watchlist); header
+  (title+issue, publisher·date); **FMV = median** hero + % change; metric cluster (Last, Median(90D),
+  90-day Range, 30-day trend sparkline); **time-window toggle (30/60/90/ALL)** + the **large trend
+  line chart** (axis-less, terracotta latest-point dot); **GradeTierMatrix** (grade × volume,
+  intensity shading); **Grade Variance** rows (grade · price · sparkline · HIGH/MED/LOW demand);
+  **Recent Transactions** (date · source·grade · right-aligned price). Tall/scrollable.
+- **Manage / Settings (gear) — NEW screen to design.** Conversational add/remove comics (limit 12).
+  Likely a conversational input view reached from the dashboard gear icon.
+
+**Still to design:** Update-Sales progress / "updated 2h ago" state; loading + error states;
+raw-vs-graded comparison on detail; **dark mode** (tokens are light-only).
+
+**Build dependency (unchanged, now concrete):** these screens are all **custom catalog widgets**
+(GradeTierMatrix, Sparkline, line chart, MetricCard, WatchlistRow) that don't exist yet, and they
+exceed today's lean payload budget. Order: **(1) lift the a2a ~9 KB SSE limit** (non-streaming
+`message/send`) → **(2) build custom catalog widgets** (start WatchlistRow + MetricCard, then
+GradeTierMatrix) → **(3) apply the Ink & Equity tokens**.
+
+**Open from review:** does the Dashboard keep any persistent text input, or is conversational entry
+fully behind the gear (with the welcome screen the exception)? Reconcile minor DESIGN.md-vs-screenshot
+mismatches at build (row chevron vs none; inline sparkline vs % delta; the cramped 2×2 metric grid).
 
 ---
 
