@@ -3,48 +3,72 @@
 > **How to use:** start a new session and say `read docs/NEXT_SESSION.md`. This file is
 > self-bootstrapping — it points you at the rest. Overwrite it as the work moves on.
 
-We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, and we've
-pivoted into **interactive UX / design polish** (Phase 5). First read `CLAUDE.md`,
-`agent/CLAUDE.md`, `app/CLAUDE.md`, and `docs/DESIGN_BACKLOG.md`. Below is the live state.
+We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, **interactive
+GenUI (E1) shipped**, and the **design is now reviewed, decided, and locked**. The next body of work
+is **building the custom A2UI catalog** to implement the accepted design. First read `CLAUDE.md`,
+`docs/PRD.md`, `docs/DESIGN_BACKLOG.md`, `agent/CLAUDE.md`, `app/CLAUDE.md`.
 
 ## What's working now (all on `main`)
 
-- **Spike C backfill: COMPLETE.** Firestore holds **785 real eBay sales** across all 12 books
-  (424 graded / 361 raw). Scraper precision hardened (`agent/tools/backfill_sales.py`).
+- **Spike C backfill: COMPLETE.** Firestore holds **785 real eBay sales** across all 12 books.
 - **`get_price_history(book_id, days, grade?)`: BUILT** (`agent/comic_sales/tools/price_history.py`).
-- **E1 — Interactive GenUI (tap-to-navigate drill-in): SHIPPED & verified in the iOS sim.** Tap a
-  watchlist comic → its detail (summary + "Median Graded Sales" per-grade lines); "← Watchlist"
-  taps back. Zero typing. The watchlist/detail render as tappable A2UI via BasicCatalog `Button`s.
+- **E1 — Interactive GenUI (tap drill-in): SHIPPED.** Watchlist auto-loads as the home screen (D6);
+  tap a comic → detail (summary + "Median Graded Sales"); "← Watchlist" backs out. Renders via
+  BasicCatalog (Card/Row/Column/Text/Button), intentionally lean.
+
+## Design is locked — build to this
+
+- **Spec:** `docs/PRD.md` (reconciled to all decisions) + `docs/DESIGN_BACKLOG.md` (decisions
+  **D1–D13** — authoritative). Design pass + tokens: `docs/design/stitch-v1/` ("Ink & Equity").
+- **Design system of record (LOCKED, D12):** "Ink & Equity" — bone `#F9F7F2`, charcoal `#1A1B1C`,
+  graphite `#5E6266`, terracotta accent `#BD472A`, muted up `#2D7A4D` / down `#C9302C`; Inter with
+  **tabular+lining** figures; flat, sharp 0px corners. → a Flutter `ThemeData`.
+- **Accepted screen model (D7–D13):**
+  - Name **Comic Sales Agent**; **FMV ≡ median** (D7/D8).
+  - **Dashboard** = list of ≤**12** tappable rows + **footer: ⚙ gear (Manage: add/remove
+    conversationally) + "$" (Update Sales)**; **no persistent dashboard text input** (D10/D11/D13).
+  - **Book Detail = the dynamic market view** (no separate Market Trends screen, D9): FMV hero →
+    MetricCards → 30/60/90 toggle + trend line chart → GradeTierMatrix → Grade-Variance rows →
+    Recent Transactions.
+  - **Manage** (gear) + **Welcome/first-run** are the only places with a text field.
 
 ## ⚠️ Read before touching the agent prompt or app render path
 
-E1 surfaced gotchas that WILL bite again — they're documented; don't rediscover them:
-- `agent/CLAUDE.md` → "Phase 3 / E1 — Interactive GenUI" + "CRITICAL rendering constraints" +
-  the ADK SQLite `session.db` recovery note.
-- `app/CLAUDE.md` → "Interactive GenUI (app side)" (dual-catalog, action→text bridge, tolerant
-  JSON repair, scroll-to-top) + "Dev loop — FIFO hot-reload harness".
-- `docs/DESIGN_BACKLOG.md` → decisions D1–D5, the Done log (each bug+fix), and the backlog.
+Hard-won gotchas (documented — don't rediscover):
+- `agent/CLAUDE.md` → "Interactive GenUI" + "CRITICAL rendering constraints" + ADK SQLite
+  `session.db` recovery.
+- `app/CLAUDE.md` → "Interactive GenUI (app side)" (dual-catalog, action→text bridge, tolerant JSON
+  repair, scroll-to-top) + "Dev loop — FIFO hot-reload harness".
+- **Top recurring constraint:** `a2a 4.2.0` truncates a single A2UI SSE event at ~9 KB → blank /
+  `Widget … not found`. This is the #1 thing to fix before rich screens (see step 1).
 
-Top recurring constraint: **keep A2UI renders lean (single Text lines, no Row/Card/nesting)** —
-`a2a 4.2.0` truncates a single SSE event at ~9 KB → blank screen / `Widget … not found`.
+## Next actions — implementation sequence (steps 1 & 2 of the old plan are DONE)
 
-## Suggested next actions (pick with the user — this is an iterative design loop)
+1. **Lift the ~9 KB SSE size limit (the gating unblock).** Rich screens (GradeTierMatrix + chart +
+   comps) far exceed the lean budget. Approach: move the app off streaming `message/stream` to
+   non-streaming **`message/send`** — confirmed via curl to return the full payload in one shot (no
+   SSE chunking). Implementation note: the app uses `genui_a2a`'s `connectAndSend` (which calls
+   `messageStream`); switching means adapting/patching that path to use the non-streaming send. Once
+   lifted, the lean single-Text constraint goes away.
+2. **Build the custom A2UI catalog** (the big work — first time beyond `BasicCatalog`; custom Flutter
+   widgets registered with GenUI, per CPCD §6). Suggested order, smallest-risk first:
+   **WatchlistRow → MetricCard → Sparkline → GradeTierMatrix → trend line chart → Grade-Variance row
+   → comps table.** Build to `docs/PRD.md` §8 + the Ink & Equity tokens. Keep the catalog contract:
+   agent binds data, widgets own the look.
+3. **Apply the tokens + screen model:** Flutter `ThemeData` from Ink & Equity; wire the dashboard
+   footer (⚙ Manage + "$" Update Sales), the Manage view, FMV=median hero, 12-book limit.
+4. **Still-open non-UX Phase 3:** the `refresh_sales` ADK tool wired to the "$" Update Sales icon
+   (non-blocking, `caffeinate`-wrapped, local-only). `docs/tufte-infographics.md` is still a stub;
+   `shared/catalog/` is still empty (the catalog contract should land there).
 
-1. **Highest-value unblock: lift the A2UI ~9 KB SSE size limit** (`docs/DESIGN_BACKLOG.md` backlog).
-   Switch the app from `message/stream` to non-streaming `message/send` (confirmed to return the
-   full payload in one shot). This re-enables RICH cards (Row/Card layouts, right-aligned prices,
-   color) which lean rendering currently forbids — the gateway to real visual polish.
-2. Then **richer cards** + the **design system** (theme/type/color, dark mode) and **prompt chips**.
-3. Still open from earlier Phase 3 (non-UX): `refresh_sales` tool + "Update Sales" button
-   (non-blocking, `caffeinate`-wrapped, local-only); the visualization catalog
-   (`Sparkline`/`GradeTierMatrix`/`SmallMultiplesGrid`); `docs/tufte-infographics.md` is a stub and
-   `shared/catalog/` is empty.
+> Remaining open *design* questions (PRD §14): guided-add vs conversation in Manage; grade-at-a-glance
+> on the row; sparse/empty grades; the Manage view's shape; dark-mode tokens. Resolve as they come up.
 
 ## Dev loop / conventions
 
 - Run agent: `cd agent && source .venv/bin/activate && adk api_server --a2a --port 8001 comic_sales`.
-  Run app: `flutter run -d <sim> --dart-define=AGENT_URL=http://127.0.0.1:8001` (FIFO harness in
-  `app/CLAUDE.md` for hot reload). Screenshots: `xcrun simctl io booted screenshot`.
+  Run app: `flutter run -d <sim> --dart-define=AGENT_URL=http://127.0.0.1:8001` (FIFO hot-reload
+  harness in `app/CLAUDE.md`). Screenshots: `xcrun simctl io booted screenshot`.
 - If the agent throws `database is locked` / stale-session: `rm -f agent/comic_sales/.adk/session.db*`,
   run ONE agent, don't hammer it with parallel requests.
 - Commit directly to `main` (solo prototype). Network calls (eBay/Firestore/Gemini) need the
