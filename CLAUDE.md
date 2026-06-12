@@ -12,7 +12,8 @@ comic-sales-agent/
 │  ├─ CPCD.md             # domain model & data contract
 │  ├─ ADR/                # Architecture Decision Records
 │  ├─ tufte-infographics.md  # Tufte visual design doctrine
-│  └─ DESIGN_BACKLOG.md   # living UX/design backlog + decisions (Phase 5)
+│  ├─ DESIGN_BACKLOG.md   # living UX/design backlog + decisions (Phase 5)
+│  └─ PRD.md              # product requirements + user flows (feeds design/wireframing)
 ├─ agent/                 # Python ADK agent — see agent/CLAUDE.md
 ├─ app/                   # Flutter iOS app — see app/CLAUDE.md
 └─ shared/catalog/        # A2UI widget catalog contract shared by agent & app
