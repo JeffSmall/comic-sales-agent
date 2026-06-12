@@ -3,51 +3,49 @@
 > **How to use:** start a new session and say `read docs/NEXT_SESSION.md`. This file is
 > self-bootstrapping — it points you at the rest. Overwrite it as the work moves on.
 
-We're continuing **Phase 3** of the comic-sales-agent monorepo. **Spike C is done** — the
-`sales` subcollection now holds real eBay history. First read `CLAUDE.md`, `agent/CLAUDE.md`,
-and `docs/CPCD.md` (§8 Phase 3, §9 schema, §11). Below is the live state and the next action.
+We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, and we've
+pivoted into **interactive UX / design polish** (Phase 5). First read `CLAUDE.md`,
+`agent/CLAUDE.md`, `app/CLAUDE.md`, and `docs/DESIGN_BACKLOG.md`. Below is the live state.
 
-## What just landed (committed to `main`)
+## What's working now (all on `main`)
 
-- **Spike C backfill is COMPLETE.** A single paced full-sweep
-  (`python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit`,
-  ~3 hrs, residential IP) wrote **785 real sales across all 12 watchlist books** into
-  Firestore `watchlist/{bookId}/sales/{ebay-<itemId>}` — **424 graded / 361 raw**, verified by
-  read-back. No Imperva block; the cool-down + 15-min pacing held. The Spike C gate (≥3 books
-  with grade-level sales) is exceeded.
-- **Scraper precision was hardened** (`agent/tools/backfill_sales.py`):
-  - `_matches_book` now matches the issue as a standalone `\b`-bounded token with an optional
-    4-digit year between title and issue — keeps `X-Men (1975) #94` / `Detective Comics 359
-    1967`, still rejects `#194`/`#940`. (The old space-stripping match over-rejected: only
-    13/200 kept for X-Men #94.)
-  - `_GRADE_RE` tolerates `CGC GRADE 9.8` / `CBCS GRADED 9.6` wording.
-  - All changes validated offline (25/25 matcher cases, 10/10 grade cases). No live re-scrape
-    was run (respecting the eBay cool-down), so **X-Men #94 still has only 13 stored sales**
-    until its next refresh re-scrapes with the improved matcher.
+- **Spike C backfill: COMPLETE.** Firestore holds **785 real eBay sales** across all 12 books
+  (424 graded / 361 raw). Scraper precision hardened (`agent/tools/backfill_sales.py`).
+- **`get_price_history(book_id, days, grade?)`: BUILT** (`agent/comic_sales/tools/price_history.py`).
+- **E1 — Interactive GenUI (tap-to-navigate drill-in): SHIPPED & verified in the iOS sim.** Tap a
+  watchlist comic → its detail (summary + "Median Graded Sales" per-grade lines); "← Watchlist"
+  taps back. Zero typing. The watchlist/detail render as tappable A2UI via BasicCatalog `Button`s.
 
-## Done since the backfill
+## ⚠️ Read before touching the agent prompt or app render path
 
-- **`get_price_history(book_id, days, grade?)` is BUILT** —
-  `agent/comic_sales/tools/price_history.py`, exported via `tools/__init__.py`, registered in
-  `agent.py`, and described in the system prompt. Reads `watchlist/{book_id}/sales` for a window
-  with an optional exact-grade filter; returns an overall summary (min/max/median/avg, first→last
-  `change_pct`, graded/raw counts), a per-grade breakdown + raw bucket (feeds GradeTierMatrix),
-  and the chronological sales series for charting. Mirrors the watchlist tools' structured-error
-  + derive-on-read conventions. Verified live against Firestore (new-mutants-98: 98 sales,
-  grade=9.8 → 12 sales median $1,000).
+E1 surfaced gotchas that WILL bite again — they're documented; don't rediscover them:
+- `agent/CLAUDE.md` → "Phase 3 / E1 — Interactive GenUI" + "CRITICAL rendering constraints" +
+  the ADK SQLite `session.db` recovery note.
+- `app/CLAUDE.md` → "Interactive GenUI (app side)" (dual-catalog, action→text bridge, tolerant
+  JSON repair, scroll-to-top) + "Dev loop — FIFO hot-reload harness".
+- `docs/DESIGN_BACKLOG.md` → decisions D1–D5, the Done log (each bug+fix), and the backlog.
 
-## Immediate next action — `refresh_sales` tool + Flutter "Update Sales" button
+Top recurring constraint: **keep A2UI renders lean (single Text lines, no Row/Card/nesting)** —
+`a2a 4.2.0` truncates a single SSE event at ~9 KB → blank screen / `Widget … not found`.
 
-- **`refresh_sales` tool + Flutter "Update Sales" button** — NON-BLOCKING ADK tool that
-  launches the scraper as a detached, `caffeinate -i`-wrapped background process and returns
-  immediately (a multi-hour synchronous tool call would time out the A2A turn). Local-agent-only
-  (residential IP). Switch routine refreshes to `--incremental`.
-- **Visualization catalog items** — `Sparkline`, `GradeTierMatrix`, `SmallMultiplesGrid`
-  (per CPCD + `docs/tufte-infographics.md`). NOTE: `docs/tufte-infographics.md` is still a stub
-  and `shared/catalog/` is still empty — both feed this work.
+## Suggested next actions (pick with the user — this is an iterative design loop)
 
-## Conventions
+1. **Highest-value unblock: lift the A2UI ~9 KB SSE size limit** (`docs/DESIGN_BACKLOG.md` backlog).
+   Switch the app from `message/stream` to non-streaming `message/send` (confirmed to return the
+   full payload in one shot). This re-enables RICH cards (Row/Card layouts, right-aligned prices,
+   color) which lean rendering currently forbids — the gateway to real visual polish.
+2. Then **richer cards** + the **design system** (theme/type/color, dark mode) and **prompt chips**.
+3. Still open from earlier Phase 3 (non-UX): `refresh_sales` tool + "Update Sales" button
+   (non-blocking, `caffeinate`-wrapped, local-only); the visualization catalog
+   (`Sparkline`/`GradeTierMatrix`/`SmallMultiplesGrid`); `docs/tufte-infographics.md` is a stub and
+   `shared/catalog/` is empty.
 
-- Commit directly to `main` (solo prototype; no branch/PR flow).
-- **Respect the eBay cool-down** — don't re-scrape casually; the data is already in Firestore.
-  Use `--incremental` and pace at ~15 min/book when you do refresh.
+## Dev loop / conventions
+
+- Run agent: `cd agent && source .venv/bin/activate && adk api_server --a2a --port 8001 comic_sales`.
+  Run app: `flutter run -d <sim> --dart-define=AGENT_URL=http://127.0.0.1:8001` (FIFO harness in
+  `app/CLAUDE.md` for hot reload). Screenshots: `xcrun simctl io booted screenshot`.
+- If the agent throws `database is locked` / stale-session: `rm -f agent/comic_sales/.adk/session.db*`,
+  run ONE agent, don't hammer it with parallel requests.
+- Commit directly to `main` (solo prototype). Network calls (eBay/Firestore/Gemini) need the
+  sandbox disabled.
