@@ -2,6 +2,13 @@
 
 > Condensed brief for a wireframing/design tool. Full detail: `docs/PRD.md`. Platform: **iOS, phone,
 > portrait**. Users: **single collector** (v1). Aim wireframes at the **target** experience.
+>
+> **⚠️ Post-design-review note (2026-06-12):** this brief seeded the Stitch v1 pass; some details are
+> now superseded by accepted decisions **D7–D13** (`docs/DESIGN_BACKLOG.md`) and the reconciled
+> `docs/PRD.md`. Key changes: **no separate Market Trends screen** (Book Detail is the dynamic market
+> view); **dashboard footer = gear (Manage) + "$" (Update Sales)** with **no persistent dashboard
+> text input**; **FMV ≡ median**; **watchlist limit 12**; design system locked to **"Ink & Equity"**.
+> Sections below updated to match; treat `PRD.md` + `DESIGN_BACKLOG.md` as authoritative.
 
 ## What it is
 An **iOS app for tracking the market value of collectible comics** (graded CGC/CBCS and raw). The UI
@@ -25,24 +32,25 @@ Sale/comp (price, date, grade-of-that-sale, edition newsstand/direct) · Price h
 sold) · Derived: last, median, min–max range, % change — per book and per grade.
 
 ## Navigation (single surface, drill-in)
-`Home = Watchlist  ⇄(tap a comic) Book Detail  →(tap "← Watchlist") back to Home`. Empty watchlist →
-Welcome/first-run view. Conversational **input bar always visible** at the bottom. "Back" is an
-in-content control, not a system bar. Content **replaces in place** (drill-in, not a growing feed).
+`Home = Watchlist  ⇄(tap a comic) Book Detail  →(tap "← Watchlist") back to Home`; `Home ⇄(tap ⚙)
+Manage`. Empty watchlist → Welcome/first-run view. **Dashboard is tap-only** — footer = **⚙ gear
+(Manage: add/remove)** + **"$" (Update Sales)**, no dashboard text field. "Back" is an in-content
+control. Content **replaces in place** (drill-in, not a growing feed).
 
 ## Screens to wireframe
-1. **Home / Watchlist (default landing, auto-loads).** Vertical list of tappable rows; each row =
-   title + issue (left), owned grade or "Raw", **last sale price** (right, decimal-aligned), and an
-   **inline sparkline** + up/down accent. Consider sort/filter chips (movers / value / grade).
+1. **Home / Watchlist (default landing, auto-loads, ≤12 books).** Vertical list of tappable rows; each
+   row = title + issue + publisher (left), owned grade or "Raw" badge, **last sale price** (right,
+   tabular), and a price ▲/▼ accent (+ optional inline sparkline). Sort chips (Value/Mover/Grade/
+   Recent/Year). Footer: ⚙ Manage (left) · "$" Update Sales (right).
 2. **Welcome / Empty (first run only).** Warm one-liner + "you're not tracking any comics yet" +
-   guidance to add the first (Title, Issue, Grade, Graded/Raw) with an example. Optional light guided
-   add alongside free typing.
-3. **Book Detail.** Top→bottom: "← Watchlist" back · header (title+issue, publisher/notes) · **price
-   summary** as MetricCards (Last, Median, Range, % change) with a window sparkline · **"Median
-   Graded Sales"** = per-grade breakdown, ideally a **GradeTierMatrix** (grade × recent sales) ·
-   raw-vs-graded + edition · 30/60/90-day toggle.
-4. **Trend / price-history exploration** (richest surface): 30/60/90-day views, grade-variance,
-   anomaly highlighting, GradeTierMatrix + SmallMultiplesGrid.
-5. **Update Sales.** A refresh action (button/chip) → non-blocking progress + "updated 2h ago".
+   guidance to add the first (Title, Issue, Grade, Graded/Raw) with an example. **Has a text field.**
+3. **Book Detail — the dynamic market view** (absorbs trends). Top→bottom: "← Watchlist" back ·
+   header (title+issue, publisher·date) · **FMV = median** hero + % change · MetricCards (Last,
+   Median, Range, 30-day sparkline) · **30/60/90/ALL toggle + large trend line chart** ·
+   **GradeTierMatrix** (grade × volume) · **Grade Variance** rows (grade·price·sparkline·HIGH/MED/LOW)
+   · **Recent Transactions** comps table.
+4. **Manage (⚙ gear).** Conversational add/remove comics (≤12) — the home for free-text entry.
+5. **Update Sales ("$" footer icon).** Non-blocking background refresh + "updated 2h ago".
 6. **States:** loading spinner; graceful sparse/empty grades; plain-language error card (never blank).
 7. *(v2, optional)* price-alert push → deep-links into a Book Detail.
 

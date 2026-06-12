@@ -26,6 +26,8 @@
 | D9 | **No separate Market Trends screen — Book Detail IS the dynamic market view.** Merge the trend chart + grade-variance into Book Detail. | 2026-06-12 | Keeps nav clean/dedicated: Dashboard ⇄ Book Detail → back → next book. `screen_market_trends.png` deleted. |
 | D10 | **Dashboard footer = two tap icons:** left **gear "Settings"** → manage (add/remove) comics conversationally; right **"$" dollar** → Update Sales. Remove the top-bar "Update Sales" button. | 2026-06-12 | Replaces Stitch's unclear footer icons; moves Update Sales off the top bar. (Note: gear conventionally reads "settings" — confirm it reads as "manage watchlist.") |
 | D11 | **Watchlist limit = 12 books.** | 2026-06-12 | Also keeps renders within the lean payload budget. |
+| D12 | **Design system of record = "Ink & Equity"** (Stitch v1 `DESIGN.md` tokens). LOCKED. | 2026-06-12 | Bone/charcoal/graphite + terracotta accent + muted up/down; Inter tabular+lining; flat, sharp corners. Maps to Flutter `ThemeData`. |
+| D13 | **Dashboard has no persistent text input.** Conversational entry lives behind the **gear → Manage** view (and on the first-run welcome screen). | 2026-06-12 | Dashboard is tap-driven: rows (drill-in) + footer gear (manage/add-remove) + "$" (update sales). |
 
 ---
 
@@ -34,7 +36,7 @@
 Source: `docs/design/stitch-v1/` (`DESIGN.md` + screenshots). Reviewed 2026-06-12; strong fit to the
 PRD's Tufte/financial-broadsheet doctrine. Accepted as the working design direction.
 
-**Design system (leading candidate — confirm to lock as theme of record):** bone surface `#F9F7F2`,
+**Design system (LOCKED — theme of record, D12):** bone surface `#F9F7F2`,
 charcoal text `#1A1B1C`, graphite metadata `#5E6266`, terracotta accent `#BD472A`, muted semantic
 `market-up #2D7A4D` / `market-down #C9302C`; **Inter** with **tabular + lining figures** (numerics
 align); flat (no shadows/borders, negative space as divider); **sharp 0px corners** for data
@@ -65,9 +67,10 @@ exceed today's lean payload budget. Order: **(1) lift the a2a ~9 KB SSE limit** 
 `message/send`) → **(2) build custom catalog widgets** (start WatchlistRow + MetricCard, then
 GradeTierMatrix) → **(3) apply the Ink & Equity tokens**.
 
-**Open from review:** does the Dashboard keep any persistent text input, or is conversational entry
-fully behind the gear (with the welcome screen the exception)? Reconcile minor DESIGN.md-vs-screenshot
-mismatches at build (row chevron vs none; inline sparkline vs % delta; the cramped 2×2 metric grid).
+**Resolved (D13):** the Dashboard has NO persistent text input — conversational entry is behind the
+gear → Manage view (welcome screen is the exception). **Still reconcile at build:** minor
+DESIGN.md-vs-screenshot mismatches (row chevron vs none; inline sparkline vs % delta; the cramped
+2×2 metric grid — widen columns / shrink type).
 
 ---
 

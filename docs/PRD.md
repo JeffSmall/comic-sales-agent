@@ -12,6 +12,12 @@
 > `CLAUDE.md` files, and the implemented app.
 >
 > **Last updated:** 2026-06-12 · **Platform:** iOS only · **Users:** single user (v1)
+>
+> **Reconciled with accepted decisions D7–D13** (see `docs/DESIGN_BACKLOG.md`) after the Stitch v1
+> design review: name = Comic Sales Agent; FMV ≡ median; no separate Market Trends screen (Book
+> Detail is the dynamic market view); dashboard footer = gear (Manage) + "$" (Update Sales) with no
+> persistent text input on the dashboard; watchlist limit = 12; design system of record = "Ink &
+> Equity" (`docs/design/stitch-v1/`).
 
 ---
 
@@ -58,8 +64,8 @@ your keys are worth, by grade, at a glance.*
   latest value. No empty screen, no required typing.
 - Let the user **drill into any comic** to understand its current market: a price summary and a
   **grade-by-grade** breakdown of recent sales.
-- Support **conversational add / edit / remove** of comics with zero forms required (typing), while
-  leaving room for a more guided add experience.
+- Support **conversational add / edit / remove** of comics (up to **12**, D11) via the footer
+  **gear → Manage** view — no forms required (typing), while leaving room for a more guided add.
 - Present **dense, scannable, Tufte-style data** (sparklines, grade-tier matrices, right-aligned
   numerics) rather than prose.
 - Provide a graceful **first-run / empty experience** that onboards a brand-new user.
@@ -91,8 +97,9 @@ The design should speak this vocabulary. These are the real entities and the dat
 product can show "9.8 median vs 9.4 median," grade-tier matrices, and "higher grades softening"
 trends. Designs should treat **grade as a first-class axis**, not an afterthought.
 
-**Derived values to display:** last sale price, median, min–max range, and % change over the window —
-all computed from the sales history (per book, and per grade).
+**Derived values to display:** last sale price, **median (a.k.a. Fair Market Value / FMV — they are
+the same thing, D8)**, min–max range, and % change over the window — all computed from the sales
+history (per book, and per grade).
 
 ---
 
@@ -133,6 +140,9 @@ from these building blocks** (and propose additions when needed — additions ex
 > **Status:** Today the app renders with **basic primitives only** (Card / Row / Column / Text /
 > Button) — the custom data-ink widgets above (Sparkline, GradeTierMatrix, SmallMultiplesGrid) are
 > **Target/Planned**. Wireframe the target widgets; we'll build them into the catalog as we go.
+>
+> **Design system of record (LOCKED, D12): "Ink & Equity"** — see `docs/design/stitch-v1/DESIGN.md`
+> and §11. These widgets get styled with those tokens.
 
 ---
 
@@ -145,22 +155,29 @@ from these building blocks** (and propose additions when needed — additions ex
 │                                                          │
 │   HOME = WATCHLIST            ⇆ (tap a comic)            │
 │        │                                                 │
-│        └── BOOK DETAIL  ── (tap "← Watchlist") ──┐       │
-│                                                  │       │
-│   (empty watchlist → WELCOME / FIRST-RUN view)   │       │
-│                                                  ▼       │
-│                                            back to HOME  │
+│        ├── BOOK DETAIL  ── (tap "← Watchlist") ── back   │
+│        │     (dynamic market view: summary, trend,       │
+│        │      grade matrix, comps — D9)                  │
+│        │                                                 │
+│        └── MANAGE  ── (tap ⚙ gear) ── add/remove comics  │
+│              (conversational; limit 12)                  │
+│                                                          │
+│   (empty watchlist → WELCOME / FIRST-RUN view,           │
+│    which DOES have a text field to add the first comic)  │
 │                                                          │
 ├─────────────────────────────────────────────────────────┤
-│  Conversational input bar (always present)  [ send ▸ ]  │
+│  Footer:   [ ⚙ Manage ]                    [ $ Update ]  │
 └─────────────────────────────────────────────────────────┘
 ```
 
-- **Single primary surface** that swaps content in place as you navigate (home ⇄ detail). It reads
-  as **drill-in**, not a growing scroll of stacked answers.
-- **The input bar is always available** at the bottom for natural-language requests (add/edit, ask
-  a trend question) regardless of which view you're on.
-- **Back** is an in-content affordance ("← Watchlist") on the detail view, not a system nav bar.
+- **Single primary surface** that swaps content in place as you navigate (home ⇄ detail ⇄ manage).
+  It reads as **drill-in**, not a growing scroll of stacked answers.
+- **Dashboard is tap-driven (D13).** It has **no persistent text input**. The footer is two icons:
+  **gear ⚙ → Manage** (add/remove comics conversationally) and **"$" → Update Sales**. The top-bar
+  "Update Sales" button is removed.
+- **Conversational text entry** appears in two places: the **Manage** view (reached via the gear) and
+  the **first-run welcome** screen (to add the very first comic).
+- **Back** is an in-content affordance ("← Watchlist") on detail/manage, not a system nav bar.
 
 ---
 
@@ -169,13 +186,16 @@ from these building blocks** (and propose additions when needed — additions ex
 For each: purpose, content, components, interactions, and states. **Built** vs **Target** is marked.
 
 ### 8.1 Home — Watchlist (populated)  · *Built (lean), Target (rich)*
-- **Purpose:** the default landing view; see every tracked comic and its latest value at a glance.
-- **Content per row:** title + issue, owned grade (e.g. "CGC 9.4" or "Raw"), and **last sale price**
-  (right-aligned). *Target:* add an inline **Sparkline** and a price-move accent (▲/▼ color).
-- **Components:** a vertical list of **WatchlistRow**s (each tappable).
-- **Interactions:** tap a row → Book Detail. Type in the input bar → add/edit/ask.
-- **Sort/scan:** alphabetical today; *Target:* consider sort options (biggest movers, value, recently
-  updated) as tappable chips.
+- **Purpose:** the default landing view; see every tracked comic (up to **12**, D11) and its latest
+  value at a glance.
+- **Content per row:** title + issue, publisher, owned grade badge (e.g. "CGC 9.4" or "Raw"), and
+  **last sale price** (right-aligned, tabular). *Target:* an inline **Sparkline** and a price-move
+  ▲/▼ accent.
+- **Components:** a vertical list of **WatchlistRow**s (each tappable). **Sort chips** (Value / Mover
+  / Grade / Recent / Year).
+- **Footer (D10/D13):** **⚙ gear → Manage** (add/remove comics) on the left; **"$" → Update Sales**
+  on the right. **No text input on the dashboard.**
+- **Interactions:** tap a row → Book Detail; tap gear → Manage; tap "$" → Update Sales.
 - **States:** loading (spinner while the watchlist loads on launch); error (a single card explaining
   the watchlist couldn't load).
 
@@ -190,41 +210,43 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 - **Target enhancement:** consider a light, guided **"Add your first comic"** affordance (a tappable
   prompt or a simple field set) in addition to free typing.
 
-### 8.3 Book Detail  · *Built (lean), Target (rich, grade-forward)*
-- **Purpose:** understand a single comic's current market, **by grade**.
+### 8.3 Book Detail — the dynamic market view  · *Built (lean), Target (rich, grade-forward)*
+> **This is the market view (D9).** There is no separate "Market Trends" screen; the trend chart and
+> grade-variance live here. A single, scrollable, grade-forward screen per book.
+- **Purpose:** understand a single comic's current market — value, trend over time, and by grade.
 - **Content, top → bottom:**
   1. **Back affordance** — "← Watchlist".
-  2. **Header** — title + issue (and publisher/notes as secondary).
-  3. **Price summary** — Last sale, Median, Range (min–max), and % change over the window. *Target:*
-     render as **MetricCard**s with a price-move accent and a window **Sparkline**.
-  4. **"Median Graded Sales"** — a per-grade breakdown: one line per grade showing that grade's
-     median and range (e.g. "9.6  $2,150  (range $936–$2,495)"). *Target:* a **GradeTierMatrix**
-     visualizing grade × recent sales, with the accent color for anomalies.
-  5. *Target:* **raw** vs **graded** comparison, edition (newsstand/direct) notes, and 30/60/90-day
-     window toggles.
-- **Interactions:** tap "← Watchlist" → Home. Type a refinement ("how are the 9.8s trending?") →
-  agent re-renders with that focus.
-- **States:** loading; "no recent sales for this book" (graceful empty); error.
+  2. **Header** — title + issue, publisher · date (secondary).
+  3. **FMV hero** — the **Fair Market Value = median price** (D8), large/tabular, with % change.
+  4. **Metric cluster** — **MetricCard**s: Last sale, Median (90D), 90-day Range (min–max), 30-day
+     trend **Sparkline**. (Avoid the cramped 2×2 wrap seen in the mockup — give numbers room.)
+  5. **Trend** — a **time-window toggle (30 / 60 / 90 / ALL)** + a large, axis-less **line chart**
+     with a terracotta latest-point dot.
+  6. **GradeTierMatrix** — grade × volume grid, intensity shading; the centerpiece for grade analysis.
+  7. **Grade Variance** — per-grade rows (grade · price · mini-sparkline · HIGH/MED/LOW demand) — the
+     "9.8s softening vs 9.4s strengthening" insight.
+  8. **Recent Transactions** — comps table (date · source·grade · right-aligned price).
+  - *Target later:* raw-vs-graded comparison; edition (newsstand/direct) notes.
+- **Interactions:** tap "← Watchlist" → Home; change the window toggle; (optional) refine via the
+  Manage/agent path ("how are the 9.8s trending?").
+- **States:** loading; "no recent sales for this book" (graceful empty / sparse grades); error.
 
-### 8.4 Add / Edit a comic  · *Built (conversational), Target (optional guided form)*
-- **Purpose:** add a new comic, or edit an existing one's owned-copy details.
-- **Built:** fully conversational — type "Add Amazing Spider-Man #129, CGC 7.0" or "change New
-  Mutants #98 to raw"; the agent confirms and the watchlist re-renders.
+### 8.4 Manage — add / edit / remove comics (the gear ⚙)  · *Built (conversational), Target (guided)*
+- **Purpose:** manage the watchlist (up to 12, D11) — reached via the **dashboard footer gear**.
+- **Design:** a conversational view with a **text input** — type "Add Amazing Spider-Man #129, CGC
+  7.0", "change New Mutants #98 to raw", "remove X"; the agent confirms and the watchlist re-renders.
+  This is the **home for free-text entry** (the dashboard itself has none, D13).
 - **Target (design opportunity):** a light guided capture for the fields (Title, Issue, Publisher,
-  Graded/Raw, Grader, Grade, Notes) for users who prefer structure — without abandoning the
-  conversational path. Worth wireframing both.
+  Graded/Raw, Grader, Grade, Notes) alongside the conversational path. Worth wireframing both.
 
-### 8.5 Update Sales (refresh market data)  · *Target/Planned*
+### 8.5 Update Sales (refresh market data — the "$" footer icon)  · *Target/Planned*
 - **Purpose:** pull the latest ~90 days of real sales for the watchlist.
-- **Design:** an **"Update Sales"** action (button or chip) that kicks off a background refresh and
-  returns immediately, with a non-blocking progress/last-updated indicator ("Updating… ~M min" /
-  "Sales updated 2h ago"). It runs in the background; the user keeps using the app.
+- **Design:** the **"$" footer icon** (D10) kicks off a background refresh and returns immediately,
+  with a non-blocking progress / last-updated indicator ("Updating… ~M min" / "Sales updated 2h
+  ago"). It runs in the background; the user keeps using the app.
 
-### 8.6 Trend / price-history exploration  · *Target/Planned (the data viz centerpiece)*
-- **Purpose:** answer "how is this selling, and by grade, over time?"
-- **Design:** 30/60/90-day views; **grade-variance** visualization; **anomaly highlighting**
-  (the single accent); the **GradeTierMatrix** and **SmallMultiplesGrid** in full. This is the
-  richest design surface and the main reason the catalog exists — give it the most exploration.
+> *(The former separate "Market Trends" screen is removed — D9. Its trend chart and grade-variance
+> now live in Book Detail, §8.3.)*
 
 ### 8.7 System states (apply across screens)
 - **Loading:** brief spinner during the launch fetch and any request round-trip.
@@ -241,8 +263,8 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 ## 9. Key user flows
 
 **Flow A — First launch (new user, empty watchlist)**
-1. Open app → brief loading → **Welcome/Empty** view.
-2. Read the welcome + instructions; type the first comic into the input bar.
+1. Open app → brief loading → **Welcome/Empty** view (this screen *does* have a text field).
+2. Read the welcome + instructions; type the first comic into the welcome field.
 3. Agent adds it → view becomes the **populated Watchlist** with the new comic.
 
 **Flow B — Daily check-in (returning user)**
@@ -258,11 +280,12 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 4. Tap "← Watchlist".
 
 **Flow D — Add / edit / remove a comic**
-1. Type the intent ("Add …", "change … to raw", "remove …").
-2. Agent confirms and mutates; the watchlist re-renders and persists.
+1. Tap the **⚙ gear** in the footer → **Manage** view.
+2. Type the intent ("Add …", "change … to raw", "remove …").
+3. Agent confirms and mutates; the watchlist re-renders and persists (≤ 12 books).
 
 **Flow E — Refresh market data (Target)**
-1. Tap **Update Sales**.
+1. Tap the **"$" icon** in the footer.
 2. A non-blocking indicator shows it's running; the user keeps browsing.
 3. When done, prices/trends reflect the newest sales.
 
@@ -280,9 +303,12 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 - FR3. Each watchlist item shows title, issue, owned grade/raw, and last sale price; is tappable. *(Built)*
 - FR4. Tapping an item opens a detail view with a price summary and per-grade sales breakdown. *(Built)*
 - FR5. A clear in-content "back" returns to the watchlist. *(Built)*
-- FR6. Add/edit/remove comics conversationally; changes persist and re-render. *(Built)*
-- FR7. Always-available conversational input. *(Built)*
+- FR6. Add/edit/remove comics conversationally (≤ 12) via the footer gear → Manage; changes persist
+  and re-render. *(Built conversationally; gear/Manage placement is Target)*
+- FR7. Conversational input available via Manage (gear) and the welcome screen — **not** a persistent
+  dashboard field (D13). *(Target)*
 - FR8. Loading and error states never leave a blank screen. *(Built)*
+- FR8b. Dashboard footer: gear → Manage (left) and "$" → Update Sales (right); no top-bar action. *(Target)*
 
 **Should (target — the design focus):**
 - FR9. Rich, Tufte-style rendering: sparklines, MetricCards, GradeTierMatrix, price-move accents.
@@ -297,22 +323,29 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 
 ---
 
-## 11. Visual design direction (for the designer)
+## 11. Visual design direction — "Ink & Equity" (LOCKED, D12)
 
-- **Aesthetic:** clean, dense, editorial/financial — think a well-set data table or a Tufte plate,
-  not a flashy consumer app. Generous data, minimal chrome.
-- **Color:** near-monochrome base + **one accent color** reserved for meaning (price up/down,
-  selection, anomalies). Today's app uses a warm off-white background with a deep-orange seed; the
-  accent and full palette are open for design.
-- **Typography:** a clear hierarchy — strong title/issue, quieter metadata, tabular/lining figures
-  for prices (decimal-aligned). Numbers are the hero.
-- **Price movement:** encode up/down with the accent (e.g., green-up/red-down is acceptable as the
-  one semantic color pair) plus direction glyphs and deltas.
-- **Grade as a visual language:** consider how grade tiers read at a glance (a 9.8 vs a 6.0) — the
-  GradeTierMatrix is where this matters most.
-- **Modes:** design **light and dark**.
-- **Identity:** app icon and launch screen are open (currently default).
-- **Motion:** subtle — drill-in transitions, the list settling to the top on navigation.
+The design system of record is **"Ink & Equity"** from the Stitch v1 pass
+(`docs/design/stitch-v1/DESIGN.md`). Tokens:
+
+- **Aesthetic:** clean, dense, editorial/financial — a high-end financial broadsheet / bespoke
+  terminal. Scholarly and disciplined; explicitly *not* gamified/comic-booky. Flat (no shadows,
+  borders, or gridlines — "negative space as divider"). Sharp **0px** corners for data containers
+  (2px only on the input field / primary buttons).
+- **Color (monochrome + one accent):** bone surface `#F9F7F2`; charcoal text `#1A1B1C`; graphite
+  metadata `#5E6266`; **terracotta accent `#BD472A`** (interaction + anomalies, used sparingly);
+  semantic **market-up `#2D7A4D`** / **market-down `#C9302C`** (muted).
+- **Typography:** **Inter**, with **tabular (tnum) + lining (lnum) figures required** for all prices,
+  grades, and deltas so columns align — numbers are the hero. Tight tracking + heavier weight for
+  headlines; smaller/softer metadata.
+- **Layout:** 4px baseline rhythm, 16px edge margins; labels left-aligned, **numerics right-aligned**;
+  GradeTierMatrix is an extremely dense grid (2px gaps), cell intensity = volume.
+- **Price movement:** ▲/▼ glyph immediately preceding the value, colored with the semantic up/down —
+  no pill/button wrapper.
+- **Modes:** tokens are **light only today**; **dark mode still to be designed.**
+- **Identity:** app icon and launch screen still open (currently default).
+- **Motion:** subtle — in-situ replacement / horizontal slides; the list settling to the top on
+  navigation.
 
 ---
 
@@ -322,8 +355,10 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 - **Catalog-constrained rendering.** Every screen is composed from the shared widget catalog; the
   agent binds data into it. "New look" = a new/edited catalog widget, not a one-off. Wireframes
   should therefore describe **reusable components**, not bespoke per-screen art.
-- **Conversational + tap dual input.** Don't design away the input bar; design *around* it. Many
-  actions are best as taps, but natural language is always available and sometimes the best path.
+- **Conversational + tap dual input — but placed deliberately (D13).** The **dashboard is
+  tap-only** (rows + gear + "$"); free-text conversational entry lives in the **Manage** view (via
+  the gear) and on the **welcome** screen. Design taps as the primary path; keep conversation a
+  tap away, not omnipresent.
 - **Data is real and grade-keyed.** ~90-day eBay sold history; not every book has sales at every
   grade — design for sparse/empty grades gracefully.
 - **Current technical limit (improving):** the present rendering path caps a single view's payload
@@ -353,18 +388,21 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 
 ## 14. Open design questions (resolve during wireframing)
 
-1. **Transcript vs dashboard feel.** We chose drill-in (single surface that replaces). Should the
-   conversational answers ever persist as scrollable history, or always replace? (Leaning: replace.)
-2. **Guided add vs pure conversation.** Is a structured add-comic form worth it, or does
-   conversational + good empty-state copy suffice?
-3. **Where do "Update Sales," sort, and filters live** — a top toolbar, inline chips, an overflow
-   menu? How prominent?
-4. **How to visualize grade tiers** at watchlist glance (a tiny sparkline per row?) vs detail
-   (full GradeTierMatrix).
-5. **Empty/sparse grades.** How to show a book/grade with few or no recent comps without looking
-   broken.
-6. **Accent semantics.** One accent for everything (selection + anomaly + price move), or a small
-   semantic set (up/down)?
+*Resolved since v1: navigation (drill-in, D1), screen set (no separate Market Trends, D9), where
+Update Sales / Manage live (footer icons, D10/D13), dashboard input model (D13), design system
+(Ink & Equity, D12). The accent question is settled by the locked tokens (terracotta for
+selection/anomaly; muted green/red for price up/down). Remaining:*
+
+1. **Guided add vs pure conversation.** Is a structured add-comic form worth it inside Manage, or
+   does conversational + good empty-state copy suffice?
+2. **Grade-at-a-glance on the watchlist row.** A tiny per-row sparkline and/or grade cue, vs keeping
+   the full GradeTierMatrix only on Book Detail? (`DESIGN.md` wants a row sparkline; the mockup shows
+   a % delta instead — pick one or fit both.)
+3. **Empty/sparse grades.** How to show a book/grade with few or no recent comps without looking
+   broken (especially in the GradeTierMatrix and Grade Variance rows).
+4. **Manage view shape.** What does the gear → Manage screen look like — a conversational panel, a
+   list with inline remove + an add field, or both?
+5. **Dark mode.** Derive a dark variant of the Ink & Equity tokens.
 
 ---
 
