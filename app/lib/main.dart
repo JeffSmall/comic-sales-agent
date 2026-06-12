@@ -119,10 +119,9 @@ class _ChatPageState extends State<ChatPage> {
     _connector.errorStream.listen(
       (e) => debugPrint('[A2UI] connector error: $e'),
     );
-    // The agent emits a separate surface per query type (watchlist_surface,
-    // price_history_surface, …), and they accumulate/stack in the ListView. As
-    // content arrives, auto-scroll so the newest surface is brought into view
-    // instead of rendering off-screen below the fold.
+    // Single-surface drill-in: each view replaces comic_surface in place. Scroll the
+    // surface list to the top on every update so the new view's header (and the
+    // "← Watchlist" back button on a detail view) is visible.
     _conversation.state.addListener(_scrollToTop);
 
     _conversation.events.listen((event) {
@@ -137,7 +136,15 @@ class _ChatPageState extends State<ChatPage> {
         debugPrint('[Conversation] event: ${event.runtimeType}');
       }
     });
+
+    // The watchlist IS the home screen — load it on launch so there's no blank
+    // screen and no need to type a prompt. The agent renders the watchlist, or a
+    // welcome view if it's empty (first run). Post-frame so the surface list is mounted.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadWatchlist());
   }
+
+  // Auto-load the watchlist on launch (the home view). Reuses the normal send path.
+  Future<void> _loadWatchlist() => _dispatch('show me my watchlist');
 
   // Drill-in navigation re-renders the single "comic_surface" in place, so each new view
   // (watchlist, or a book detail with its "← Watchlist" back button + header at the top)
@@ -329,9 +336,15 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
+    if (text.isEmpty) return;
+    _textCtrl.clear();
+    await _dispatch(text);
+  }
+
+  // Send a user-text request through the conversation, managing the busy flag.
+  Future<void> _dispatch(String text) async {
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
-    _textCtrl.clear();
     try {
       await _conversation.sendRequest(ChatMessageFactories.userText(text));
     } finally {
@@ -354,14 +367,10 @@ class _ChatPageState extends State<ChatPage> {
               valueListenable: _conversation.state,
               builder: (context, state, _) {
                 if (state.surfaces.isEmpty) {
-                  return Center(
-                    child: state.isWaiting
-                        ? const CircularProgressIndicator()
-                        : const Text(
-                            'Ask about your watchlist…',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                  );
+                  // The watchlist auto-loads on launch, so this is the brief
+                  // loading flash before the first surface (watchlist or welcome)
+                  // arrives. Show a spinner either way.
+                  return const Center(child: CircularProgressIndicator());
                 }
                 return ListView(
                   controller: _scrollCtrl,

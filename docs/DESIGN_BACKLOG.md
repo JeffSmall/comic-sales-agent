@@ -20,6 +20,7 @@
 | D3 | **Single-surface drill-in.** All views render to one surface `comic_surface`; re-render replaces. | 2026-06-11 | No growing surface stack; clean drill-in. Resolves the old "surfaces accumulate forever" clutter. |
 | D4 | **Lean rendering: single Text lines in a Column; avoid Row/Card/nesting.** | 2026-06-11 | Forced by the a2a ~9 KB SSE truncation + gemini malformed-JSON. Trades rich layout for reliability until the transport limit is lifted (see backlog). |
 | D5 | **Encode action args in the action NAME** (`view_book:<id>`), app bridges action→text. | 2026-06-11 | Avoids BasicCatalog data-context resolution AND the unproven DataPart→agent path. |
+| D6 | **The watchlist IS the home screen.** App auto-loads it on launch (no prompt); agent renders a welcome/empty view when there are zero comics. | 2026-06-12 | App can't detect "empty" itself (only sees A2UI), so the agent owns the empty-state branch — keeps the invariant. |
 
 ---
 
@@ -50,6 +51,12 @@ _(none — E1 shipped; see Done.)_
 
 ## Done
 
+- **Watchlist as home screen** ✅ (2026-06-12, D6). App auto-loads the watchlist on launch — no
+  prompt, no blank screen. Agent renders a welcome/empty view (intro copy + "add your first comic"
+  instructions: title, issue, grade, graded/raw) when `get_watchlist` returns zero comics. Auto-load
+  verified in the sim with a populated list; the **welcome/empty branch is implemented but not yet
+  seen live** (the watchlist has 12 comics) — trusted for now; verify when convenient (point the
+  agent at an empty Firestore collection).
 - **E1 — Tappable watchlist → book detail drill-in, zero typing** ✅ (2026-06-11). Tap a comic →
   its detail (summary + "Median Graded Sales" per-grade lines) renders; "← Watchlist" taps back.
   Verified working in the simulator. Implements D1–D5. Full conventions live in `agent/CLAUDE.md`
