@@ -154,3 +154,55 @@ A2UI structure but with real Firestore data. The app should work without modific
 Possible Phase 2 app changes:
 - Show a loading state while the agent fetches from Firestore (already handled by `isWaiting`)
 - Surface persistence across sessions (currently cleared on app restart)
+
+## Phase 3 / E1 — Interactive GenUI (app side)
+
+Tap-driven navigation: the agent renders tappable A2UI (borderless `Button`s) and the user
+navigates by tapping instead of typing. See `agent/CLAUDE.md` and `docs/DESIGN_BACKLOG.md` for the
+agent-side conventions. The app changes (all in `main.dart`) and why they exist:
+
+- **Dual catalogId registration (REQUIRED).** The agent non-deterministically emits the surface's
+  `catalogId` as either `https://a2ui.org/specification/v0_9/basic_catalog.json` (BasicCatalog's
+  real id) or the SDK-default `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json`. If
+  the app only registers one, the other yields `Catalog … not found for surface` and a blank screen.
+  Fix: register the same catalog under BOTH ids —
+  `SurfaceController(catalogs: [basic, basic.copyWith(catalogId: <the other id>)])`.
+
+- **Action→text bridge (`_bridgeActionToText`).** A tapped `Button` arrives in `_sendToAgent` as a
+  `ChatMessage` carrying a `UiInteractionPart` whose JSON is
+  `{"version":"v0.9","action":{"name":"view_book:<id>" | "view_watchlist", …}}`. The connector would
+  serialize that as an A2A **DataPart**, which this stack has never reliably delivered to the agent
+  (A2UI only ever flows as text here). So before `connectAndSend` we translate the action `name` to
+  the equivalent text request ("show price history and details for book_id <id>" / "show me my
+  watchlist") and send THAT. Typed messages (a TextPart, no interaction part) pass through unchanged.
+  Detect via `part.isUiInteractionPart` / `part.asUiInteractionPart!.interaction`.
+
+- **Tolerant JSON parse (`_tolerantJsonDecode` / `_balanceBrackets`).** gemini-2.5-flash
+  intermittently emits A2UI JSON missing its trailing `}`/`]` (~1/3 of renders) → a blank surface.
+  When `jsonDecode` throws, we re-scan the string (tracking string literals/escapes so braces inside
+  text aren't counted), append the closers needed to balance any open `{`/`[`, and retry once. This
+  is the active path inside `_injectA2uiFromBuffer`. NOTE: it cannot recover content that was
+  *truncated mid-structure* (the a2a ~9 KB SSE limit) — that still yields `Widget with id … not
+  found`; the real fix there is keeping agent payloads small (single Text lines).
+
+- **Drill-in scroll = scroll to TOP, not bottom (`_scrollToTop`).** With single-surface drill-in,
+  each new view (watchlist, or a detail whose "← Watchlist" back button + header are at the top)
+  replaces the surface in place. On every `ConversationState` update we animate the surface ListView
+  to offset 0 so the top of the new view is visible. (An earlier version scrolled to the bottom for a
+  stacking model; that hid the back button on drill-in.)
+
+## Dev loop — FIFO hot-reload harness (no tmux)
+
+To drive `flutter run` from non-interactive tooling, launch it reading stdin from a named pipe and
+keep a writer open so stdin never EOFs:
+```bash
+mkfifo /tmp/flutter_stdin
+sleep 1000000 > /tmp/flutter_stdin &           # holder keeps the write end open
+flutter run -d <sim-id> --dart-define=AGENT_URL=http://127.0.0.1:8001 < /tmp/flutter_stdin > /tmp/flutter_run.log 2>&1 &
+echo r > /tmp/flutter_stdin                     # hot reload  (works reliably)
+```
+- **Hot reload (`r`) works** for build/method-body changes — but NOT for `initState` changes
+  (listeners/controllers set up once); those need a relaunch.
+- **Hot restart (`R`) over the FIFO is flaky** ("Could not prepare isolate" / lost connection) — for
+  `initState`-level changes, cold-relaunch the process instead.
+- Screenshots need no special permission: `xcrun simctl io booted screenshot /tmp/x.png`.

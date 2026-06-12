@@ -11,7 +11,8 @@ comic-sales-agent/
 ├─ docs/
 │  ├─ CPCD.md             # domain model & data contract
 │  ├─ ADR/                # Architecture Decision Records
-│  └─ tufte-infographics.md  # Tufte visual design doctrine
+│  ├─ tufte-infographics.md  # Tufte visual design doctrine
+│  └─ DESIGN_BACKLOG.md   # living UX/design backlog + decisions (Phase 5)
 ├─ agent/                 # Python ADK agent — see agent/CLAUDE.md
 ├─ app/                   # Flutter iOS app — see app/CLAUDE.md
 └─ shared/catalog/        # A2UI widget catalog contract shared by agent & app
@@ -378,6 +379,23 @@ immediately ("started; ~M min in the background"). Key constraints discovered:
 bucket (feeds the future GradeTierMatrix), and the chronological sales series for charting.
 Verified live against Firestore. Still TODO: `refresh_sales` tool + "Update Sales" button;
 agent surfaces price movement / grade-variance; build the visualization catalog items.
+
+**Interactive GenUI — E1 (tap-to-navigate drill-in): ✅ SHIPPED.** The watchlist and book details
+are now **tappable** — tap a comic to drill into its detail (summary + per-grade "Median Graded
+Sales"), tap "← Watchlist" to go back, zero typing. UI is input, not just output (see
+`docs/DESIGN_BACKLOG.md` D1–D5). **Read `agent/CLAUDE.md` "Interactive GenUI" and `app/CLAUDE.md`
+"Interactive GenUI (app side)" before touching the agent prompt or the app render path** — they
+document the hard gotchas this surfaced, several of which will bite again:
+- BasicCatalog `Button` (borderless) = the tap primitive; single surface `comic_surface`; action
+  args encoded in the action name; app bridges the action back to a text request.
+- **Keep A2UI renders lean (single Text lines, no Row/Card/nesting):** `a2a 4.2.0` truncates a
+  single SSE event at ~9 KB → blank / `Widget … not found`. Lifting this limit (non-streaming
+  `message/send`) is the top design-polish unblock — logged in `docs/DESIGN_BACKLOG.md`.
+- gemini-2.5-flash intermittently emits invalid JSON (drops trailing `}`) → app has a
+  bracket-balancing tolerant parser. catalogId is emitted non-deterministically → app registers
+  the catalog under both ids.
+- ADK's SQLite session store `agent/comic_sales/.adk/session.db` locks/goes stale under
+  restart-thrashing; recover by `rm -f comic_sales/.adk/session.db*` + one clean agent.
 
 ### Phase 4 — Production (deferred)
 

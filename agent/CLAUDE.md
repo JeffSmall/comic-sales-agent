@@ -218,3 +218,58 @@ python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1   
 python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 --commit   # persist one book
 python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit     # paced full sweep
 ```
+
+## Phase 3 / E1 — Interactive GenUI (tap-to-navigate drill-in)
+
+The agent renders the watchlist and book details as **tappable** A2UI so the user navigates by
+tapping, not typing (see `docs/DESIGN_BACKLOG.md` D1/D2/E1). Implemented entirely in the system
+prompt in `agent.py` (BasicCatalog only — no custom catalog yet). Hard-won conventions:
+
+- **Single-surface drill-in.** Every view renders to ONE surface, `surfaceId: "comic_surface"`
+  (createSurface then updateComponents, every turn). Re-rendering REPLACES the previous view, which
+  gives drill-in navigation with no growing surface stack. (Earlier phases used a different
+  surfaceId per query, which accumulated.)
+- **Tappable items = BasicCatalog `Button`.** BasicCatalog has no "onTap card", but a `Button`
+  (`"variant":"borderless"`) whose `child` is any component IS tappable and dispatches an
+  `action.event`. Watchlist = a Column whose children are one borderless Button per comic; each
+  Button's `child` is a single Text. The Column children are ONLY the Buttons; each Text is the
+  Button's `child`, never also a direct Column child (else it renders twice).
+- **Action payload is encoded in the action NAME**, e.g. `{"event":{"name":"view_book:<book_id>"}}`
+  and `{"event":{"name":"view_watchlist"}}`. We put `book_id` in the name (not `action.event.context`)
+  to skip BasicCatalog's data-context resolution. The app translates the action back to a text
+  request (see `app/CLAUDE.md` "action→text bridge"); the agent just receives a normal text turn
+  ("show price history and details for book_id X" / "show me my watchlist") it already handles.
+- **DETAIL view** (on "show price history … book_id X"): call `get_price_history(book_id=X)`, render
+  top→bottom: (1) a back affordance FIRST — borderless Button, child Text "← Watchlist", action
+  `view_watchlist`; (2) title Text; (3) a few summary Text lines; (4) "Median Graded Sales" then ONE
+  Text line per grade `"<grade>  $<median>  (range $min–$max)"` — the word "Median" lives in the
+  section title, never per row.
+
+### CRITICAL rendering constraints (the source of most "nothing renders" bugs)
+
+- **Keep every render SMALL and SIMPLE — single Text lines in a Column; avoid Row/Card/nesting.**
+  Reason: a single A2UI SSE event is **truncated around ~9 KB** by `a2a 4.2.0`
+  (`a2a_client.dart` reads the body and `json.decode`s each `data:` line). A rich 12-item watchlist
+  (Button→Row→3 Texts) or a ~15-grade detail (Row+2 Texts each) exceeds that, the JSON is cut
+  mid-structure, and the surface renders blank OR with `Widget with id … not found` (dangling child
+  refs). One-Text-per-line keeps payloads ~3–5 KB. The proper fix (lift the limit via non-streaming
+  `message/send`, or a custom catalog) is logged in `docs/DESIGN_BACKLOG.md`.
+- **gemini-2.5-flash intermittently emits invalid JSON** (drops the final `}`), even on small
+  payloads, ~1/3 of the time. The app repairs this (bracket-balancing, see `app/CLAUDE.md`), but
+  keep payloads small so a repair never has to guess across truncated content.
+- **catalogId trap (still live).** The model non-deterministically emits the SDK-default
+  `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json` instead of the BasicCatalog id
+  `https://a2ui.org/specification/v0_9/basic_catalog.json`. The app now registers the catalog under
+  BOTH ids so it resolves either way — do not "fix" this by only emitting one.
+
+### ADK SQLite session store — `comic_sales/.adk/session.db` (operational gotcha)
+
+ADK 2.2.0 keeps A2A conversation sessions in a per-agent **SQLite** db at
+`agent/comic_sales/.adk/session.db`. It is fragile under this project's dev loop:
+- **`database is locked`** — caused by concurrent access (e.g. firing many test `curl`s at the agent
+  while the app is also connected) or by SIGKILLing the agent mid-request (leaves a `.db-journal`).
+- **`ValueError: … stale session`** — the db persists across restarts, so an app contextId from a
+  previous agent process can conflict after a restart.
+- **Recovery:** stop the agent cleanly, then `rm -f comic_sales/.adk/session.db*` (safe — it is only
+  A2A conversation state; the watchlist lives in Firestore), and start ONE agent. Avoid hammering the
+  agent with parallel requests. This is unrelated to the prompt/payload bugs above.
