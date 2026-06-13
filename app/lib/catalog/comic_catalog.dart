@@ -705,6 +705,7 @@ class _AxisChartPainter extends CustomPainter {
       ..color = InkEquity.hairline
       ..strokeWidth = 1;
     const labelStyle = TextStyle(
+      fontFamily: InkEquity.fontFamily,
       color: InkEquity.graphite,
       fontSize: 10,
       fontFeatures: InkEquity.tabularFigures,

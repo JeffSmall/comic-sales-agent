@@ -48,20 +48,8 @@ class ComicSalesApp extends StatelessWidget {
     return MaterialApp(
       title: 'Comic Sales Agent',
       debugShowCheckedModeBanner: false,
-      // Minimal Ink & Equity surface colors so the custom catalog widgets render
-      // on bone. Full ThemeData + Inter font is a later step (Phase 5).
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: InkEquity.terracotta,
-          surface: InkEquity.bone,
-        ),
-        scaffoldBackgroundColor: InkEquity.bone,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: InkEquity.bone,
-          foregroundColor: InkEquity.charcoal,
-        ),
-        useMaterial3: true,
-      ),
+      // Full Ink & Equity app-shell theme + bundled Inter font (D12 — Step 3).
+      theme: InkEquity.theme(),
       home: const ChatPage(),
     );
   }
@@ -73,6 +61,14 @@ class ChatPage extends StatefulWidget {
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
+
+/// Which app-shell screen we're on. The agent renders a single `comic_surface`,
+/// so this is app-side navigation state layered on top of it — it decides the
+/// chrome (app-bar title/back, and footer vs. text-input bottom bar), per the
+/// PRD screen model (D7–D13): the dashboard is tap-only (footer = ⚙ Manage / "$"
+/// Update Sales, no text field); free-text entry lives in Manage and on the
+/// first-run welcome screen only.
+enum _View { watchlist, detail, manage }
 
 class _ChatPageState extends State<ChatPage> {
   late final a2a.A2AClient _a2aClient;
@@ -88,6 +84,14 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _textCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
   bool _sending = false;
+
+  // App-side navigation state (see [_View]). The bottom bar shows the dashboard
+  // footer (⚙/"$") while browsing a populated watchlist or a book detail, and a
+  // text-input bar in Manage (entered via the gear) or on the first-run welcome
+  // screen (an empty watchlist). _watchlistEmpty is detected from the rendered
+  // watchlist response (no WatchlistRow ⇒ the agent rendered the welcome view).
+  _View _view = _View.watchlist;
+  bool _watchlistEmpty = false;
 
   @override
   void initState() {
@@ -157,7 +161,36 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // Auto-load the watchlist on launch (the home view). Reuses the normal send path.
-  Future<void> _loadWatchlist() => _dispatch('show me my watchlist');
+  Future<void> _loadWatchlist() {
+    _setView(_View.watchlist);
+    return _dispatch('show me my watchlist');
+  }
+
+  void _setView(_View v) {
+    if (_view == v) return;
+    setState(() => _view = v);
+  }
+
+  // Enter Manage (the ⚙ footer): keep the current surface visible and reveal the
+  // text-input bar so the user can add/edit/remove conversationally (PRD §8.4).
+  // No agent round-trip is needed to enter — Manage is app-side chrome.
+  void _enterManage() => _setView(_View.manage);
+
+  // Leave Manage and return to the dashboard, reloading the (possibly mutated)
+  // watchlist so the footer view reflects the current list.
+  void _exitManage() => _loadWatchlist();
+
+  // The "$" footer icon — Update Sales. Wiring it to the non-blocking
+  // `refresh_sales` ADK tool is the next Phase 3 task (NEXT_SESSION step 4); for
+  // now the affordance exists but reports that it isn't live yet.
+  void _onUpdateSales() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Updating sales isn’t wired up yet — coming next.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 
   // Drill-in navigation re-renders the single "comic_surface" in place, so each new view
   // (watchlist, or a book detail with its "← Watchlist" back button + header at the top)
@@ -193,6 +226,14 @@ class _ChatPageState extends State<ChatPage> {
         final text = _actionToText(name);
         if (text != null) {
           debugPrint('[action bridge] $name -> "$text"');
+          // A tap navigates: a row/back/window-toggle moves between the
+          // watchlist and a book detail. Update the shell so the right chrome
+          // (footer vs. input) shows once the response renders.
+          if (name == 'view_watchlist') {
+            _setView(_View.watchlist);
+          } else if (name!.startsWith('view_book:')) {
+            _setView(_View.detail);
+          }
           return ChatMessageFactories.userText(text);
         }
       } catch (e) {
@@ -372,6 +413,14 @@ class _ChatPageState extends State<ChatPage> {
     } else {
       debugPrint('[A2UI fallback] injected $found A2UI message(s).');
     }
+
+    // First-run detection: when we're on the watchlist view, a response with no
+    // WatchlistRow means the agent rendered the welcome/empty view (the user has
+    // no comics yet) — that screen needs the text-input bar to add the first one.
+    if (_view == _View.watchlist) {
+      final empty = !text.contains('"WatchlistRow"');
+      if (empty != _watchlistEmpty) setState(() => _watchlistEmpty = empty);
+    }
   }
 
   // Decode A2UI JSON, tolerating the model occasionally dropping trailing
@@ -461,10 +510,22 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final manage = _view == _View.manage;
+    final welcome = _view == _View.watchlist && _watchlistEmpty;
+    // Free-text entry only in Manage and on the first-run welcome screen (D13);
+    // every other dashboard/detail view uses the tap-only footer.
+    final showInput = manage || welcome;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Comic Sales Agent'),
-        centerTitle: false,
+        title: Text(manage ? 'Manage Watchlist' : 'Comic Sales Agent'),
+        leading: manage
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Done',
+                onPressed: _exitManage,
+              )
+            : null,
       ),
       body: Column(
         children: [
@@ -481,7 +542,7 @@ class _ChatPageState extends State<ChatPage> {
                 }
                 return ListView(
                   controller: _scrollCtrl,
-                  // Extra bottom padding so the last card clears the input bar
+                  // Extra bottom padding so the last card clears the bottom bar
                   // and isn't visually crowded against the footer divider.
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                   children: [
@@ -502,8 +563,105 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           const Divider(height: 1),
-          _InputBar(controller: _textCtrl, sending: _sending, onSend: _send),
+          // Dashboard footer (tap-only) while browsing; text input in Manage /
+          // first-run welcome.
+          if (showInput)
+            _InputBar(
+              controller: _textCtrl,
+              sending: _sending,
+              onSend: _send,
+              hint: manage
+                  ? 'Add, edit, or remove a comic…'
+                  : 'Add your first comic…',
+            )
+          else
+            _DashboardFooter(
+              onManage: _enterManage,
+              onUpdateSales: _onUpdateSales,
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// The tap-only dashboard footer (D10/D13): ⚙ Manage on the left, "$" Update
+/// Sales on the right. No persistent text input on the dashboard — adding/editing
+/// happens in Manage (the gear), refresh via "$".
+class _DashboardFooter extends StatelessWidget {
+  const _DashboardFooter({required this.onManage, required this.onUpdateSales});
+
+  final VoidCallback onManage;
+  final VoidCallback onUpdateSales;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 52,
+        child: Row(
+          children: [
+            Expanded(
+              child: _FooterButton(
+                icon: Icons.settings_outlined,
+                label: 'Manage',
+                alignment: Alignment.centerLeft,
+                onTap: onManage,
+              ),
+            ),
+            Expanded(
+              child: _FooterButton(
+                icon: Icons.attach_money,
+                label: 'Update Sales',
+                alignment: Alignment.centerRight,
+                onTap: onUpdateSales,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FooterButton extends StatelessWidget {
+  const _FooterButton({
+    required this.icon,
+    required this.label,
+    required this.alignment,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Alignment alignment;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Align(
+        alignment: alignment,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: InkEquity.charcoal),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: InkEquity.charcoal,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -514,11 +672,13 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.sending,
     required this.onSend,
+    this.hint = 'Ask about your watchlist…',
   });
 
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  final String hint;
 
   @override
   Widget build(BuildContext context) {
@@ -530,11 +690,8 @@ class _InputBar extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: controller,
-                decoration: const InputDecoration(
-                  hintText: 'Ask about your watchlist…',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
+                autofocus: true,
+                decoration: InputDecoration(hintText: hint),
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSend(),
               ),

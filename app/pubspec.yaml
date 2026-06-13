@@ -65,6 +65,15 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Inter — the Ink & Equity typeface (D12). One variable font covers all weights
+  # (Thin–Black); Flutter maps `fontWeight` to the wght axis. Tabular+lining
+  # figures are requested per-style via FontFeature (see theme/ink_equity.dart).
+  # License: fonts/Inter-OFL.txt (SIL OFL 1.1).
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: fonts/Inter-VariableFont.ttf
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

@@ -4,10 +4,13 @@
 > self-bootstrapping — it points you at the rest. Overwrite it as the work moves on.
 
 We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, the **custom A2UI
-catalog is BUILT** (the watchlist + the rich Book Detail render to the Ink & Equity design), and the
-SSE transport limit is lifted. The next body of work is **step 3 — applying the full theme + screen
-model (app shell)**. First read `CLAUDE.md`, `app/CLAUDE.md`, `agent/CLAUDE.md`,
-`shared/catalog/comic_catalog_v1.md`, `docs/PRD.md`, `docs/DESIGN_BACKLOG.md`.
+catalog is BUILT** (the watchlist + the rich Book Detail render to the Ink & Equity design), the SSE
+transport limit is lifted, and **the app shell is themed (step 3 DONE)** — full Ink & Equity
+`ThemeData`, bundled **Inter** font, dashboard **footer** (⚙ Manage / "$" Update Sales), the
+**Manage** view, and the 12-book limit. The next body of work is **step 4 — the `refresh_sales` ADK
+tool wired to the "$" Update Sales icon** (non-blocking, local-only). First read `CLAUDE.md`,
+`app/CLAUDE.md`, `agent/CLAUDE.md`, `shared/catalog/comic_catalog_v1.md`, `docs/PRD.md`,
+`docs/DESIGN_BACKLOG.md`.
 
 ## What's working now (all on `main`)
 
@@ -45,19 +48,24 @@ Hard-won gotchas live in the CLAUDE.md files — don't rediscover them:
 - `agent/CLAUDE.md` → callable instruction, disable-thinking, A2UI emission order (createSurface →
   updateDataModel → updateComponents), `comic_surface` drill-in, ADK `session.db` recovery.
 
-## Next actions — implementation sequence (steps 1 & 2 are DONE)
+## Next actions — implementation sequence (steps 1–3 are DONE)
 
 1. ✅ **DONE — Lifted the ~9 KB SSE limit** (migrated to non-streaming `message/send`).
 2. ✅ **DONE — Built the custom A2UI catalog** (all 10 widgets above + the trend-chart axes/grid and
    consistent price formatting). Verified end-to-end on the simulator. Commits `7d69c95`, `5df8579`,
    `74a9401`, `5e43a31`, `0eaca4d`.
-3. **← NEXT: Apply the tokens + screen model (app shell).** Full Flutter `ThemeData` from Ink &
-   Equity + bundle the **Inter** font; wire the dashboard **footer** (⚙ Manage + "$" Update Sales),
-   the **Manage** view, and enforce the **12-book** limit. (FMV=median hero is already done.) The
-   custom widgets self-style; this step is the app shell (app bar, footer, input bar, Manage screen)
-   + the font asset.
-4. **Still-open non-UX Phase 3:** the `refresh_sales` ADK tool wired to the "$" Update Sales icon
-   (non-blocking, `caffeinate`-wrapped, local-only). `docs/tufte-infographics.md` is still a stub.
+3. ✅ **DONE — Applied the tokens + screen model (app shell).** Full `ThemeData` from Ink & Equity
+   (`InkEquity.theme()` in `app/lib/theme/ink_equity.dart`) + bundled **Inter** (variable font,
+   `app/fonts/Inter-VariableFont.ttf`, declared in `pubspec.yaml`). App-side `_View` state in
+   `main.dart` drives the chrome: tap-only **dashboard footer** (⚙ Manage / "$" Update Sales, NO
+   dashboard text input — D13); the **Manage** view (gear → app-bar back + "Manage Watchlist" title
+   + input bar); free-text only in Manage + the first-run welcome (empty-watchlist detection via the
+   absence of `WatchlistRow` in the response). **12-book limit** enforced in the agent prompt
+   (`agent.py`: refuse the 13th add, render an explanatory Card). Verified on the simulator.
+4. **← NEXT: `refresh_sales` ADK tool wired to the "$" Update Sales icon** (non-blocking,
+   `caffeinate -i`-wrapped detached process, local-only / residential IP). The footer "$" button
+   currently shows a "not wired up yet" SnackBar (`_onUpdateSales` in `main.dart`) — replace that
+   with a real `_dispatch` once the tool exists. `docs/tufte-infographics.md` is still a stub.
 
 > **Minor catalog polish deferred** (`shared/catalog/comic_catalog_v1.md` "known nits"): watchlist-row
 > inline sparkline + ▲/▼ change (needs per-book change in `get_watchlist`); grades occasionally
