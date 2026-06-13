@@ -1,0 +1,44 @@
+I've analyzed the PRDs for the Comic Sales Agent iOS app. To ensure the wireframes meet your vision, here are my proposed resolutions for the open design questions.
+
+1. Transcript vs. Dashboard
+Recommendation: Dashboard (Replace). To maintain a high-density, "financial" feel, the UI should swap in place. A scrollable transcript risks diluting the data-ink ratio with repetitive conversational history. We'll use a single surface where navigation is a clean drill-in (Watchlist ⇄ Detail).
+
+2. Guided Add vs. Pure Conversation
+Recommendation: Conversational with a "Ghost" Guided State. The empty state should provide a very clear "instructional" template in the input bar (e.g., placeholder text: "Add Amazing Fantasy #15, CGC 9.8"). For the target design, I’ll include a light, structured capture sheet that can be toggled if the agent needs clarification, ensuring accuracy without forcing a form-first experience.
+
+3. Actions & Filters (Update Sales, Sort)
+Recommendation: Inline Contextual Chips. To stay "Tufte-clean," we'll avoid a heavy top toolbar. "Update Sales" will live as a quiet, secondary action at the top of the Watchlist, while Sort/Filter will be horizontal scrolling chips (e.g., Value, Mover, Grade) that sit just above the list.
+
+4. Grade Tier Visualization
+Recommendation: Row Sparklines (Watchlist) + GradeTierMatrix (Detail). The Watchlist rows will use a "word-sized" sparkline representing the book's overall trend. The Detail view will serve as the deep dive, featuring the full GradeTierMatrix to show the specific grade-by-grade variance.
+
+5. Handling Sparse/Empty Grades
+Recommendation: Dimmed "No Comps" State. Rather than removing missing grades (which breaks the matrix's scannability), we'll show the grade labels in a lower-contrast "dimmed" state with a dash or "—" to indicate no recent sales. This maintains the structural axis of the data.
+
+6. Accent Semantics
+Recommendation: Dual Semantic Accents (Up/Down). Given the finance-flavored domain, the distinction between a price gain and a loss is critical. I'll use a single primary brand accent for UI interaction (selection/anomalies) but reserve a clear, muted red/green semantic pair for price deltas to ensure instant legibility of market moves.
+
+
+I've generated the target wireframes for the Comic Sales Agent app, following the 'Ink & Equity' design system. The designs focus on a Tufte-inspired 'Data-Ink' aesthetic—maximizing density while minimizing visual noise.
+
+Key Screens Delivered:
+Watchlist Dashboard (Home):
+
+The Hub: Features a scannable list of your keys. Each row shows the title, owned grade, a word-sized sparkline for the trend, and a right-aligned last sale price.
+Contextual Actions: Includes sorting chips (Value, Mover, Grade) and a quiet 'Update Sales' affordance.
+Dual Accents: Uses a terracotta primary for UI interaction and a semantic red/green pair for market movement.
+Welcome / First Run:
+
+Guided Onboarding: A clean empty state that provides explicit guidance in the input bar to help new users add their first comic without friction.
+Book Detail - Grade Analysis:
+
+Grade-First Axis: The centerpiece is the Grade/Volume Matrix, which maps sales volume across condition tiers.
+Metric Cards: High-level 'Last Sale', 'Median', and 'Range' stats provide an immediate financial snapshot.
+Recent Transactions: A clean table of the latest comps to back up the data.
+Market Trends & Comparison:
+
+Deep Dive: A dedicated view for price history exploration, featuring 30/60/90-day toggles and a Small Multiples Grid to compare how different grade tiers (9.8 vs 9.2) are trending relative to each other.
+Design Rationale:
+Drill-in Navigation: We've stuck to a dashboard feel where views swap in place, keeping the focus on the current data task.
+Always-Present Input: The conversational bar remains at the bottom of every screen, ensuring natural language requests are always one tap away.
+Tabular Alignment: All pricing and grade data use lining figures to ensure vertical scannability, a hallmark of financial design.

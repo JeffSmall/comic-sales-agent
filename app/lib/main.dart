@@ -11,6 +11,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:genui_a2a/genui_a2a.dart';
+// genui_a2a re-exports only A2AClient/AgentCard at its top level. The A2A message
+// model (Message, Part, Task, Artifact, Role, TaskState) lives in its internal a2a
+// library; we import it directly to build non-streaming message/send requests
+// in-app. Pinned at 0.9.0 (never upgraded), so this internal path is stable.
+// ignore: implementation_imports
+import 'package:genui_a2a/src/a2a/a2a.dart' as a2a;
 import 'package:logging/logging.dart';
 
 // The ADK `adk web` server; override with --dart-define=AGENT_URL=...
@@ -56,18 +62,19 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
-  late final A2uiAgentConnector _connector;
+  late final a2a.A2AClient _a2aClient;
   late final SurfaceController _surfaceController;
   late final A2uiTransportAdapter _transport;
   late final Conversation _conversation;
 
+  // Threaded across turns so the agent keeps one ADK session (continuity).
+  String? _contextId;
+  String? _taskId;
+  int _msgSeq = 0;
+
   final TextEditingController _textCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
   bool _sending = false;
-
-  // Accumulates raw text from textStream so we can extract A2UI blocks after
-  // the full response arrives (fallback for streaming-parser timing issues).
-  final StringBuffer _responseBuffer = StringBuffer();
 
   @override
   void initState() {
@@ -92,11 +99,13 @@ class _ChatPageState extends State<ChatPage> {
     // 2. Transport adapter — bridges connector output → surface controller
     _transport = A2uiTransportAdapter(onSend: _sendToAgent);
 
-    // 3. Agent connector — talks A2A to the ADK web server
-    // adk api_server --a2a registers each agent at /a2a/{agent_folder_name}
-    _connector = A2uiAgentConnector(
-      url: Uri.parse('$_agentBaseUrl/a2a/comic_sales'),
-    );
+    // 3. A2A client — talks A2A to the ADK server via non-streaming message/send.
+    // adk api_server --a2a registers each agent at /a2a/{agent_folder_name}.
+    // We deliberately bypass genui_a2a's A2uiAgentConnector.connectAndSend (which
+    // uses message/stream / SSE — capped at ~9 KB per event in a2a 4.2.0, blanking
+    // rich screens). message/send returns the complete Task payload in one HTTP
+    // response with no chunk cap. See _sendNonStreaming.
+    _a2aClient = a2a.A2AClient(url: '$_agentBaseUrl/a2a/comic_sales');
 
     // 4. Conversation facade wires transport ↔ surface controller
     _conversation = Conversation(
@@ -104,21 +113,6 @@ class _ChatPageState extends State<ChatPage> {
       transport: _transport,
     );
 
-    // 5. Pipe connector output into the transport adapter
-    _connector.stream.listen((msg) {
-      debugPrint('[A2UI] message received: $msg');
-      _transport.addMessage(msg);
-    }, onError: (e) => debugPrint('[A2UI] stream error: $e'));
-    _connector.textStream.listen((chunk) {
-      debugPrint(
-        '[A2UI] text chunk: ${chunk.substring(0, chunk.length.clamp(0, 120))}',
-      );
-      _transport.addChunk(chunk);
-      _responseBuffer.write(chunk); // accumulate for fallback parser
-    }, onError: (e) => debugPrint('[A2UI] textStream error: $e'));
-    _connector.errorStream.listen(
-      (e) => debugPrint('[A2UI] connector error: $e'),
-    );
     // Single-surface drill-in: each view replaces comic_surface in place. Scroll the
     // surface list to the top on every update so the new view's header (and the
     // "← Watchlist" back button on a detail view) is visible.
@@ -200,29 +194,78 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendToAgent(ChatMessage message) async {
-    _responseBuffer.clear();
     message = _bridgeActionToText(message);
     String? responseText;
     try {
-      responseText = await _connector.connectAndSend(message);
+      responseText = await _sendNonStreaming(message);
     } catch (e, st) {
       debugPrint('[sendToAgent] EXCEPTION: $e');
       debugPrint('[sendToAgent] STACK: $st');
       rethrow;
     }
-    // The streaming A2uiParserTransformer may silently drop JSON (Map<String,
-    // dynamic> vs Map<String,Object?> at runtime), so we parse <a2ui-json>
-    // blocks ourselves. PREFER connectAndSend's return value: it is the single,
-    // complete text of the final agent message. _responseBuffer concatenates
-    // every textStream emission, and for large payloads the streaming SSE
-    // reassembly interleaves/duplicates chunks and corrupts the JSON (the
-    // fallback parser then fails mid-block). Use the buffer only if the return
-    // value somehow lacks A2UI.
-    final source =
-        (responseText != null && responseText.contains('<a2ui-json>'))
-        ? responseText
-        : _responseBuffer.toString();
-    _injectA2uiFromBuffer(source);
+    // The agent wraps A2UI JSON in <a2ui-json> tags inside a TextPart; we parse
+    // those blocks ourselves (genui's A2uiParserTransformer silently drops them —
+    // Map<String,dynamic> vs Map<String,Object?> at runtime). message/send returns
+    // the complete final text in one shot, so there is no streaming buffer to fall
+    // back to: parse the returned text directly.
+    if (responseText != null) _injectA2uiFromBuffer(responseText);
+  }
+
+  // Send via A2A message/send (non-streaming) and return the agent's final text.
+  //
+  // Replaces genui_a2a's connectAndSend, which uses message/stream (SSE). In
+  // a2a 4.2.0 a single SSE event is truncated at ~9 KB, which blanks any rich
+  // A2UI screen (GradeTierMatrix + chart + comps far exceed that). message/send
+  // is a plain HTTP POST that returns the entire Task payload in one body with no
+  // per-event cap (verified: a 14 KB watchlist response arrives intact).
+  //
+  // ADK places the agent's output in task.artifacts (status.message is null here),
+  // so we concatenate every artifact TextPart — that carries the <a2ui-json>
+  // blocks for _injectA2uiFromBuffer. contextId/taskId are threaded back so the
+  // agent keeps a single ADK session across turns.
+  Future<String?> _sendNonStreaming(ChatMessage message) async {
+    final parts = <a2a.Part>[
+      for (final p in message.parts)
+        if (p is TextPart) a2a.Part.text(text: p.text),
+    ];
+    var msg = a2a.Message(
+      messageId: 'msg-${DateTime.now().microsecondsSinceEpoch}-${_msgSeq++}',
+      role: a2a.Role.user,
+      parts: parts,
+      extensions: [a2uiExtensionUri.toString()],
+    );
+    if (_taskId != null) msg = msg.copyWith(referenceTaskIds: [_taskId!]);
+    if (_contextId != null) msg = msg.copyWith(contextId: _contextId);
+
+    final task = await _a2aClient.messageSend(msg);
+    _taskId = task.id;
+    _contextId = task.contextId;
+
+    final state = task.status.state;
+    if (state == a2a.TaskState.failed ||
+        state == a2a.TaskState.canceled ||
+        state == a2a.TaskState.rejected) {
+      debugPrint('[A2A] task $state: ${task.status.message}');
+    }
+
+    final buf = StringBuffer();
+    void addParts(List<a2a.Part> ps) {
+      for (final p in ps) {
+        if (p is a2a.TextPart && p.text.trim().isNotEmpty) {
+          if (buf.isNotEmpty) buf.write('\n');
+          buf.write(p.text);
+        }
+      }
+    }
+
+    for (final artifact in task.artifacts ?? const <a2a.Artifact>[]) {
+      addParts(artifact.parts);
+    }
+    // Fallback: some turns may carry the text on status.message instead.
+    final statusMsg = task.status.message;
+    if (buf.isEmpty && statusMsg != null) addParts(statusMsg.parts);
+
+    return buf.isEmpty ? null : buf.toString();
   }
 
   // Regex-extracts every <a2ui-json>…</a2ui-json> block from [text], decodes
@@ -328,7 +371,7 @@ class _ChatPageState extends State<ChatPage> {
     _conversation.dispose();
     _transport.dispose();
     _surfaceController.dispose();
-    _connector.dispose();
+    _a2aClient.close();
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();

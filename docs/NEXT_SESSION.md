@@ -39,17 +39,18 @@ Hard-won gotchas (documented — don't rediscover):
   `session.db` recovery.
 - `app/CLAUDE.md` → "Interactive GenUI (app side)" (dual-catalog, action→text bridge, tolerant JSON
   repair, scroll-to-top) + "Dev loop — FIFO hot-reload harness".
-- **Top recurring constraint:** `a2a 4.2.0` truncates a single A2UI SSE event at ~9 KB → blank /
-  `Widget … not found`. This is the #1 thing to fix before rich screens (see step 1).
+- **Former top constraint (NOW RESOLVED):** `a2a 4.2.0` truncated a single A2UI SSE event at ~9 KB.
+  The app no longer streams — it sends via non-streaming `message/send` (`_a2aClient.messageSend` in
+  `main.dart`), which returns the whole `Task` payload in one HTTP body with no cap. Rich screens
+  are unblocked; the lean single-`Text` constraint is lifted. See `app/CLAUDE.md` → "Transport".
 
-## Next actions — implementation sequence (steps 1 & 2 of the old plan are DONE)
+## Next actions — implementation sequence (steps 1, 1.5 & 2 of the old plan are DONE)
 
-1. **Lift the ~9 KB SSE size limit (the gating unblock).** Rich screens (GradeTierMatrix + chart +
-   comps) far exceed the lean budget. Approach: move the app off streaming `message/stream` to
-   non-streaming **`message/send`** — confirmed via curl to return the full payload in one shot (no
-   SSE chunking). Implementation note: the app uses `genui_a2a`'s `connectAndSend` (which calls
-   `messageStream`); switching means adapting/patching that path to use the non-streaming send. Once
-   lifted, the lean single-Text constraint goes away.
+1. ✅ **DONE — Lifted the ~9 KB SSE size limit.** The app was migrated off streaming
+   `message/stream` to non-streaming **`message/send`** in `app/lib/main.dart` (`_sendNonStreaming`,
+   built on a dedicated `a2a.A2AClient`; A2UI text is read from `task.artifacts[].parts`).
+   Verified end-to-end: watchlist auto-load + tap drill-in both render; a 27 KB detail response
+   arrives intact. The lean single-`Text` constraint is gone — build rich screens freely.
 2. **Build the custom A2UI catalog** (the big work — first time beyond `BasicCatalog`; custom Flutter
    widgets registered with GenUI, per CPCD §6). Suggested order, smallest-risk first:
    **WatchlistRow → MetricCard → Sparkline → GradeTierMatrix → trend line chart → Grade-Variance row

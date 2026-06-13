@@ -50,13 +50,13 @@ logging: any
 ```dart
 _surfaceController = SurfaceController(catalogs: [BasicCatalogItems.asCatalog()]);
 _transport = A2uiTransportAdapter(onSend: _sendToAgent);
-_connector = A2uiAgentConnector(url: Uri.parse('$_agentBaseUrl/a2a/comic_sales'));
+_a2aClient = a2a.A2AClient(url: '$_agentBaseUrl/a2a/comic_sales');  // message/send, not streaming
 _conversation = Conversation(controller: _surfaceController, transport: _transport);
 ```
 
-Then two stream listeners are attached to `_connector`:
-- `_connector.stream` — DataPart A2UI messages (not currently used; agent sends text only)
-- `_connector.textStream` — text chunks from the agent (carries the `<a2ui-json>` payload)
+No connector stream listeners: `message/send` is request/response, so `_sendToAgent` awaits the
+full `Task` from `_a2aClient.messageSend` and extracts the text inline (see Transport section
+below). The old `A2uiAgentConnector` + `_connector.stream`/`textStream` listeners are gone.
 
 ### Data flow
 
@@ -65,18 +65,37 @@ User types query
   → _conversation.sendRequest()
   → _transport.sendRequest()
   → _sendToAgent()
-  → _connector.connectAndSend()   # awaits full SSE stream
-      ↓ (SSE events arrive asynchronously)
-  → textStream fires for each TextPart
-  → _transport.addChunk(chunk)    # for ConversationContentReceived / text display
-  → _responseBuffer.write(chunk)  # accumulated for fallback parser
-      ↓ (after connectAndSend returns)
-  → _injectA2uiFromBuffer()       # THE ACTIVE RENDERING PATH (see below)
+  → _sendNonStreaming()           # A2A message/send (plain HTTP POST, NOT streaming)
+  → _a2aClient.messageSend(msg)   # awaits one complete Task response
+      ↓ (single JSON body — no SSE, no ~9 KB chunk cap)
+  → extract text from task.artifacts[].parts (status.message is null here)
+  → _injectA2uiFromBuffer(text)   # THE ACTIVE RENDERING PATH (see below)
   → _transport.addMessage(msg)    # for each A2UI message
   → Conversation → SurfaceController.handleMessage()
   → SurfaceAdded / ComponentsUpdated events
   → UI rebuilds via ValueListenableBuilder on _conversation.state
 ```
+
+### Transport: non-streaming `message/send` (NOT `message/stream`)
+
+The app does **not** use `genui_a2a`'s `A2uiAgentConnector.connectAndSend` — that calls
+`client.messageStream` (SSE), and in `a2a 4.2.0` a single SSE event is truncated at ~9 KB,
+which blanks any rich A2UI screen. Instead `_sendNonStreaming` (in `main.dart`) builds an
+`a2a.Message` and calls `_a2aClient.messageSend(msg)` directly — a plain HTTP POST that returns
+the **entire `Task` payload in one body with no per-event cap** (verified: 27 KB detail responses
+arrive intact). The lean "single Text lines only" constraint is therefore **lifted** — rich
+catalog screens are now safe.
+
+- The A2A model types (`Message`, `Part`, `Task`, `Artifact`, `Role`, `TaskState`) are not
+  exported at `genui_a2a`'s top level; `main.dart` imports them via
+  `package:genui_a2a/src/a2a/a2a.dart` (one `// ignore: implementation_imports`).
+- ADK puts the agent's `<a2ui-json>` text in `task.artifacts[].parts` (TextParts). `status.message`
+  is **null** on a completed turn — do NOT read text from `status.message` (the old streaming path
+  did; that won't work here). `status.message` is only a fallback for non-completed turns.
+- `_contextId`/`_taskId` are captured from each `Task` and threaded back (`contextId` /
+  `referenceTaskIds`) so the agent keeps one ADK session across turns.
+- `extensions: [a2uiExtensionUri.toString()]` on the outgoing message makes the client send the
+  `X-A2A-Extensions` header (the A2UI extension negotiation).
 
 ### Critical: the rendering fallback
 
@@ -90,18 +109,13 @@ The active rendering path is `_injectA2uiFromBuffer()`:
 2. For each unique block: `jsonDecode` → `Map<String, Object?>.from(...)` →
    `A2uiMessage.fromJson()` → `_transport.addMessage()` (bypasses the buggy parser).
 
-**Parse the return value of `connectAndSend`, NOT `_responseBuffer` (CRITICAL).**
-`connectAndSend` returns the single, complete text of the final agent message.
-`_responseBuffer` accumulates *every* `textStream` emission, and for large payloads
-(e.g. a 3+ comic watchlist, ~2.5KB of A2UI) the streaming SSE reassembly in `a2a 4.2.0`
-interleaves/duplicates chunks, producing malformed JSON — the fallback then fails with
-`FormatException: Unexpected character` mid-block and only the `createSurface` injects, so
-the surface never updates (stale UI). `_sendToAgent` therefore prefers the returned text and
-only falls back to `_responseBuffer` if the return value lacks `<a2ui-json>`. The parser also
-dedupes identical blocks (the same A2UI can arrive as both a message and an artifact).
-
-`addChunk` is still called (for prose text in `ConversationContentReceived`), but it is
-NOT relied upon for widget rendering.
+With `message/send` the text source is unambiguous: `_sendNonStreaming` returns the concatenated
+`task.artifacts[].parts` text (one complete payload), and `_sendToAgent` feeds exactly that to
+`_injectA2uiFromBuffer`. There is no streaming accumulator anymore — the old `_responseBuffer` /
+`addChunk` / interleaved-SSE-corruption problem is gone. The parser still dedupes identical blocks
+(the same A2UI can appear in both `artifacts` and `history`) and still runs the tolerant
+bracket-balancer (the model occasionally drops a trailing `}` — a generation artifact, independent
+of transport).
 
 ### UI structure
 
