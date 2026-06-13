@@ -195,9 +195,23 @@ agent-side conventions. The app changes (all in `main.dart`) and why they exist:
   intermittently emits A2UI JSON missing its trailing `}`/`]` (~1/3 of renders) → a blank surface.
   When `jsonDecode` throws, we re-scan the string (tracking string literals/escapes so braces inside
   text aren't counted), append the closers needed to balance any open `{`/`[`, and retry once. This
-  is the active path inside `_injectA2uiFromBuffer`. NOTE: it cannot recover content that was
-  *truncated mid-structure* (the a2a ~9 KB SSE limit) — that still yields `Widget with id … not
-  found`; the real fix there is keeping agent payloads small (single Text lines).
+  is the active path inside `_injectA2uiFromBuffer`. (Now that the transport is non-streaming
+  `message/send`, payloads aren't size-capped, so this only patches the model's own dropped-closer
+  habit, not transport truncation.)
+
+- **Synthetic `createSurface` guard (`_injectA2uiFromBuffer`).** The model occasionally omits the
+  `createSurface` block and emits only `updateComponents`. `SurfaceController` buffers
+  `updateComponents` until it sees `createSurface` for that surfaceId, so a miss leaves the surface
+  blank *forever* with no recovery (observed as an intermittent blank watchlist on launch). Fix: we
+  decode all blocks first, and if none creates a surface but one updates it, we synthesize a
+  `createSurface` (surfaceId from the update block, catalogId = `comicCatalogId`) and inject it
+  first. Re-creating an existing surface is a no-op/replace — exactly what every normal turn does.
+
+- **Custom catalog (`catalog/comic_catalog.dart`).** The app registers `buildComicCatalog()`
+  (BasicCatalog + custom widgets: WatchlistRow, MetricCard, MetricCluster, GradeTierMatrix,
+  CompsTable) under the custom id `com.comicsales.catalog.v1` AND both BasicCatalog ids, so any
+  catalogId the model emits resolves the full set. Widgets own their look (Ink & Equity tokens in
+  `theme/ink_equity.dart`); the agent binds literal-string data. Contract: `shared/catalog/comic_catalog_v1.md`.
 
 - **Drill-in scroll = scroll to TOP, not bottom (`_scrollToTop`).** With single-surface drill-in,
   each new view (watchlist, or a detail whose "← Watchlist" back button + header are at the top)

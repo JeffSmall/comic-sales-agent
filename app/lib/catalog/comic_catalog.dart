@@ -35,6 +35,74 @@ String _str(Object? v) {
   return v.toString();
 }
 
+/// Reads an A2UI numeric prop defensively (JSON number, numeric string, or a
+/// wrapped literal). Returns null when it can't be parsed.
+double? _num(Object? v) {
+  if (v is num) return v.toDouble();
+  if (v is String) {
+    return double.tryParse(v.replaceAll(RegExp(r'[^0-9.\-]'), ''));
+  }
+  if (v is Map) return _num(v['literalNumber'] ?? v['value']);
+  return null;
+}
+
+/// Reads a list-of-objects prop defensively.
+List<Map<String, Object?>> _maps(Object? v) {
+  if (v is List) {
+    return [
+      for (final e in v)
+        if (e is Map) e.cast<String, Object?>(),
+    ];
+  }
+  return const [];
+}
+
+/// A compact metric cell (label + value + optional signed delta), shared by
+/// [metricCard] and [metricCluster]. No borders/shadows (Tufte). `hero` enlarges
+/// it for the FMV headline.
+Widget _metricCell({
+  required String label,
+  required String value,
+  String delta = '',
+  bool hero = false,
+}) {
+  return Padding(
+    padding: EdgeInsets.symmetric(vertical: hero ? 8 : 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            color: InkEquity.graphite,
+            fontSize: hero ? 12 : 10.5,
+            letterSpacing: 0.4,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: InkEquity.price.copyWith(
+            fontSize: hero ? 32 : 19,
+            fontWeight: hero ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+        if (delta.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            delta,
+            style: InkEquity.change(
+              InkEquity.signColor(delta),
+            ).copyWith(fontSize: hero ? 14 : 12),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
 /// `WatchlistRow` — one comic in the watchlist (PRD §6 / CPCD §6.1).
 ///
 /// Title/issue left, grade + last price right (tabular, right-aligned), optional
@@ -137,9 +205,268 @@ final CatalogItem watchlistRow = CatalogItem(
   },
 );
 
-/// All custom catalog items (extended slice by slice: MetricCard, Sparkline,
-/// GradeTierMatrix, trend chart, Grade-Variance row, comps table).
-final List<CatalogItem> comicCatalogItems = [watchlistRow];
+/// `MetricCard` — one number + label (+ optional signed delta). No borders or
+/// shadows. `variant: "hero"` is the large FMV headline; `"metric"` (default) is
+/// the compact form used in clusters.
+final CatalogItem metricCard = CatalogItem(
+  name: 'MetricCard',
+  dataSchema: S.object(
+    description:
+        'A single metric: a label, a preformatted value, and an optional signed '
+        'delta. variant "hero" renders large (use for the Fair Market Value '
+        'headline); "metric" is compact (default).',
+    properties: {
+      'label': S.string(
+        description:
+            'The metric label, e.g. "Fair Market Value" or "Last sale".',
+      ),
+      'value': S.string(description: r'Preformatted value, e.g. "$1,199.00".'),
+      'delta': S.string(
+        description:
+            'Optional signed change, e.g. "+29.2%". Colored up/down/flat.',
+      ),
+      'variant': S.string(
+        description: 'Size: "hero" (large headline) or "metric" (compact).',
+        enumValues: ['hero', 'metric'],
+      ),
+    },
+    required: ['label', 'value'],
+  ),
+  widgetBuilder: (ctx) {
+    final d = ctx.data as Map;
+    return _metricCell(
+      label: _str(d['label']),
+      value: _str(d['value']),
+      delta: _str(d['delta']),
+      hero: _str(d['variant']) == 'hero',
+    );
+  },
+);
+
+/// `MetricCluster` — a roomy horizontal row of compact metrics (Last / Median /
+/// Range under the FMV hero). Gives each number room (PRD §8.3 — avoid the
+/// cramped 2×2 wrap).
+final CatalogItem metricCluster = CatalogItem(
+  name: 'MetricCluster',
+  dataSchema: S.object(
+    description:
+        'A horizontal cluster of 2–4 compact metrics (each a label + value + '
+        'optional delta). Use beneath the FMV hero for Last / Median / Range.',
+    properties: {
+      'metrics': S.list(
+        description: 'The metrics, in display order (2–4).',
+        items: S.object(
+          properties: {
+            'label': S.string(),
+            'value': S.string(),
+            'delta': S.string(),
+          },
+          required: ['label', 'value'],
+        ),
+      ),
+    },
+    required: ['metrics'],
+  ),
+  widgetBuilder: (ctx) {
+    final metrics = _maps((ctx.data as Map)['metrics']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final m in metrics)
+            Expanded(
+              child: _metricCell(
+                label: _str(m['label']),
+                value: _str(m['value']),
+                delta: _str(m['delta']),
+              ),
+            ),
+        ],
+      ),
+    );
+  },
+);
+
+/// `GradeTierMatrix` — grade × recent-sales density (CPCD §6.1, the centerpiece
+/// of grade analysis). One row per grade: grade label, a volume bar (length +
+/// intensity ∝ sale count), count, and median price (right, tabular).
+final CatalogItem gradeTierMatrix = CatalogItem(
+  name: 'GradeTierMatrix',
+  dataSchema: S.object(
+    description:
+        'A dense grade-by-volume grid for one comic. One entry per grade '
+        '(highest first), plus an optional "Raw" entry. Bind from '
+        'get_price_history.by_grade[] (and raw).',
+    properties: {
+      'grades': S.list(
+        description:
+            'Grade rows, highest grade first; include a "Raw" row last.',
+        items: S.object(
+          properties: {
+            'grade': S.string(description: 'Grade label, e.g. "9.6" or "Raw".'),
+            'count': S.number(description: 'Number of sales at this grade.'),
+            'median': S.string(description: r'Median price, e.g. "$2,150".'),
+            'range': S.string(
+              description: r'Optional range, e.g. "$936–$2,495".',
+            ),
+          },
+          required: ['grade', 'count', 'median'],
+        ),
+      ),
+    },
+    required: ['grades'],
+  ),
+  widgetBuilder: (ctx) {
+    final grades = _maps((ctx.data as Map)['grades']);
+    final counts = [for (final g in grades) (_num(g['count']) ?? 0)];
+    final maxCount = counts.isEmpty
+        ? 1.0
+        : counts.reduce((a, b) => a > b ? a : b).clamp(1.0, double.infinity);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final g in grades)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 36,
+                  child: Text(_str(g['grade']), style: InkEquity.price),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _DensityBar(
+                    fraction: (_num(g['count']) ?? 0) / maxCount,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    '${(_num(g['count']) ?? 0).toInt()}',
+                    style: InkEquity.subtitle,
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 84,
+                  child: Text(
+                    _str(g['median']),
+                    style: InkEquity.price,
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  },
+);
+
+/// A horizontal volume bar whose length and intensity encode a 0..1 fraction.
+/// Single accent color, no axis — data-ink only.
+class _DensityBar extends StatelessWidget {
+  const _DensityBar({required this.fraction});
+
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = fraction.clamp(0.0, 1.0);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            Container(height: 10, color: InkEquity.hairline),
+            Container(
+              height: 10,
+              width: (constraints.maxWidth * f).clamp(
+                2.0,
+                constraints.maxWidth,
+              ),
+              color: InkEquity.terracotta.withValues(alpha: 0.25 + 0.55 * f),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// `CompsTable` — recent transactions (PRD §8.3). Dense rows: date left, source ·
+/// grade middle, price right (tabular). Bind the most recent sales.
+final CatalogItem compsTable = CatalogItem(
+  name: 'CompsTable',
+  dataSchema: S.object(
+    description:
+        'A compact list of recent sales for one comic, newest first. Bind the '
+        'most recent entries of get_price_history.sales[].',
+    properties: {
+      'rows': S.list(
+        description: 'Recent sales, newest first (about 6–8).',
+        items: S.object(
+          properties: {
+            'date': S.string(description: 'Short date, e.g. "May 12".'),
+            'meta': S.string(
+              description: 'Source · grade, e.g. "eBay · CGC 9.4".',
+            ),
+            'price': S.string(
+              description: r'Preformatted price, e.g. "$1,200".',
+            ),
+          },
+          required: ['date', 'price'],
+        ),
+      ),
+    },
+    required: ['rows'],
+  ),
+  widgetBuilder: (ctx) {
+    final rows = _maps((ctx.data as Map)['rows']);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final r in rows)
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: InkEquity.hairline)),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 64,
+                  child: Text(_str(r['date']), style: InkEquity.subtitle),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_str(r['meta']), style: InkEquity.subtitle),
+                ),
+                const SizedBox(width: 8),
+                Text(_str(r['price']), style: InkEquity.price),
+              ],
+            ),
+          ),
+      ],
+    );
+  },
+);
+
+/// All custom catalog items. Slice 1: WatchlistRow. Slice 2: the Book Detail
+/// data-display widgets. Still planned: Sparkline / TrendChart (numeric series)
+/// + the interactive 30/60/90 window toggle + GradeVarianceRow.
+final List<CatalogItem> comicCatalogItems = [
+  watchlistRow,
+  metricCard,
+  metricCluster,
+  gradeTierMatrix,
+  compsTable,
+];
 
 /// The full catalog: `BasicCatalog` primitives + the custom items above, under
 /// [comicCatalogId]. Register the result (and aliases under the BasicCatalog ids)

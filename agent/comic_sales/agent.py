@@ -68,22 +68,49 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "\"$<last_price>\" (preformatted, e.g. \"$1,200\"). The Column's children are ONLY the "
         "WatchlistRow ids (r_<book_id>). One WatchlistRow per comic; tapping one opens its detail.\n"
         "- DETAIL view (request \"show price history and details for book_id X\"): call "
-        "get_price_history(book_id=X), then render top-to-bottom: (1) a BACK affordance FIRST — a "
-        "Button \"variant\":\"borderless\" whose child is a Text \"← Watchlist\" and whose "
-        "action is {\"event\":{\"name\":\"view_watchlist\"}}; (2) a Text with the comic title+issue; "
-        "(3) a compact price summary as a FEW single Text lines (e.g. \"Last $935.76\", "
-        "\"Median $400.50\", \"Range $57–$2,495\", \"Change +168.1%\"); (4) a Text title "
-        "\"Median Graded Sales\", then ONE Text line PER GRADE formatted "
-        "\"<grade>   $<median>   (range $<min>–$<max>)\" e.g. \"9.6   $2,150   (range $936–$2,495)\" "
-        "— do NOT repeat the word \"Median\"; (5) one Text line for the raw bucket.\n\n"
-        "LAYOUT RULES: For the WATCHLIST, use one WatchlistRow per comic (above). For the DETAIL "
-        "view, keep using single Text components in a Column for now (richer custom detail widgets "
-        "are coming) — one Text per summary line and one Text per grade. Payload size is no longer "
-        "tightly capped (the app uses non-streaming message/send), but keep renders clean: prefer "
-        "the custom widget for the watchlist and avoid unnecessary nesting elsewhere.\n\n"
+        "get_price_history(book_id=X), then render to comic_surface a Column \"root\" with these "
+        "children IN ORDER, using the CUSTOM WIDGETS below (bind values from the tool result; "
+        "format all money like \"$1,199\" and percents like \"+29.2%\"):\n"
+        "  (1) BACK affordance FIRST — a Button \"variant\":\"borderless\" whose child is a Text "
+        "\"← Watchlist\", action {\"event\":{\"name\":\"view_watchlist\"}}.\n"
+        "  (2) a Text (variant \"h4\") with the comic title+issue.\n"
+        "  (3) a MetricCard \"variant\":\"hero\": label \"Fair Market Value\", value "
+        "\"$<summary.median>\", delta \"<sign><summary.change_pct>%\" (FMV ≡ median).\n"
+        "  (4) a MetricCluster with metrics = [ {\"label\":\"Last\",\"value\":\"$<summary.last_price>\"}, "
+        "{\"label\":\"Median 90D\",\"value\":\"$<summary.median>\"}, "
+        "{\"label\":\"Range\",\"value\":\"$<summary.min>–$<summary.max>\"} ].\n"
+        "  (5) a Text (variant \"h5\") \"Sales by Grade\", then a GradeTierMatrix whose \"grades\" "
+        "is ONE entry per by_grade item (highest grade first) "
+        "{\"grade\":\"<grade>\",\"count\":<count>,\"median\":\"$<median>\","
+        "\"range\":\"$<min>–$<max>\"}, and — if the tool's \"raw\" is present — a final entry "
+        "{\"grade\":\"Raw\",\"count\":<raw.count>,\"median\":\"$<raw.median>\","
+        "\"range\":\"$<raw.min>–$<raw.max>\"}. \"count\" is a NUMBER, not a string.\n"
+        "  (6) a Text (variant \"h5\") \"Recent Sales\", then a CompsTable whose \"rows\" is the "
+        "~6 MOST RECENT sales (the LAST entries of the returned sales[] array, NEWEST FIRST): "
+        "{\"date\":\"<short date e.g. May 12>\",\"meta\":\"<source> · <grade or 'Raw'>\","
+        "\"price\":\"$<price>\"}.\n"
+        "Copy numbers from the tool result EXACTLY — never invent or round sales you weren't given.\n\n"
+        "CUSTOM WIDGETS (this catalog adds these to the basic Text/Column/Button/Row; emit them "
+        "as components with the fields shown — the app styles them):\n"
+        "  • WatchlistRow: {bookId, title, subtitle?, price, change?} — a tappable watchlist row.\n"
+        "  • MetricCard: {label, value, delta?, variant?(\"hero\"|\"metric\")} — one number.\n"
+        "  • MetricCluster: {metrics:[{label,value,delta?}]} — a row of compact metrics.\n"
+        "  • GradeTierMatrix: {grades:[{grade,count(number),median,range?}]} — grade×volume grid.\n"
+        "  • CompsTable: {rows:[{date,meta,price}]} — recent transactions.\n\n"
         "Pattern for ONE watchlist comic (ONE self-contained component; adapt ids/values per comic):\n"
         '  {"id":"r_amazing-fantasy-15","component":"WatchlistRow","bookId":"amazing-fantasy-15",'
-        '"title":"Amazing Fantasy #15","subtitle":"CGC 9.0","price":"$1,200"}\n\n'
+        '"title":"Amazing Fantasy #15","subtitle":"CGC 9.0","price":"$1,200"}\n'
+        "Pattern for a DETAIL (abbreviated — adapt ids/values; root.children lists every child id):\n"
+        '  {"id":"root","component":"Column","children":["back","title","fmv","cluster",'
+        '"grades_h","matrix","comps_h","comps"]},\n'
+        '  {"id":"fmv","component":"MetricCard","variant":"hero","label":"Fair Market Value",'
+        '"value":"$1,199","delta":"+29.2%"},\n'
+        '  {"id":"cluster","component":"MetricCluster","metrics":[{"label":"Last","value":"$969"},'
+        '{"label":"Median 90D","value":"$1,199"},{"label":"Range","value":"$21–$6,500"}]},\n'
+        '  {"id":"matrix","component":"GradeTierMatrix","grades":[{"grade":"9.6","count":4,'
+        '"median":"$6,155","range":"$5,811–$6,500"},{"grade":"Raw","count":12,"median":"$95"}]},\n'
+        '  {"id":"comps","component":"CompsTable","rows":[{"date":"May 12","meta":"eBay · CGC 9.4",'
+        '"price":"$4,650"}]}\n\n'
         "CRITICAL: You MUST emit TWO separate A2UI JSON blocks in order:\n"
         "1. First block: a 'createSurface' message:\n"
         '   {"version":"v0.9","createSurface":{"surfaceId":"comic_surface",'

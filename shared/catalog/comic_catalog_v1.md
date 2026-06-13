@@ -45,18 +45,41 @@ Example component:
  "title":"Amazing Spider-Man #129","subtitle":"CGC 7.0","price":"$969.00"}
 ```
 
-## Planned widgets (build order — smallest-risk first)
+### `MetricCard` — one number + label  · *shipped*
+A label, a preformatted value, and an optional signed delta. No borders/shadows.
 
-These extend the catalog as Book Detail becomes the rich market view (PRD §8.3). Not yet built:
+| prop | req | type | meaning |
+|---|---|---|---|
+| `label` | ✓ | string | e.g. `Fair Market Value` / `Last sale` |
+| `value` | ✓ | string | preformatted, e.g. `$1,199` |
+| `delta` | | string | signed change e.g. `+29.2%`; colored up/down/flat |
+| `variant` | | `hero`\|`metric` | `hero` = large FMV headline; `metric` (default) = compact |
 
-- `MetricCard` — one number + label (+ optional signed delta). FMV hero, Last, Median, Range.
-- `Sparkline` — word-sized trend line, single accent dot for the latest point. Inline in rows / cards.
-- `GradeTierMatrix` — grade × recent-sales density grid (GitHub-contribution style). The centerpiece
-  of grade analysis; binds `get_price_history.by_grade[]`.
-- `TrendChart` — axis-less line chart with a 30/60/90/ALL toggle and a terracotta latest-point dot;
-  binds the chronological `get_price_history.sales[]` price series.
+### `MetricCluster` — a roomy row of compact metrics  · *shipped*
+`metrics`: a list of `{label, value, delta?}` laid out as equal-width cells (Last / Median / Range).
+
+### `GradeTierMatrix` — grade × volume density  · *shipped*
+The centerpiece of grade analysis. `grades`: a list (highest grade first, plus a `Raw` entry) of
+`{grade: string, count: number, median: string, range?: string}`. Each row renders a terracotta
+density bar (length + intensity ∝ `count`), the count, and the median (right, tabular). Bind from
+`get_price_history.by_grade[]` (+ `raw`).
+
+### `CompsTable` — recent transactions  · *shipped*
+`rows`: a list (newest first, ~6–8) of `{date: string, meta: string, price: string}` where `meta`
+is `source · grade` (e.g. `eBay · CGC 9.4`). Bind the most recent `get_price_history.sales[]`.
+
+## Planned widgets (next)
+
+- `Sparkline` / `TrendChart` — word-sized + large axis-less line charts with a terracotta
+  latest-point dot, binding the chronological `sales[]` price series. **Open problem:** a 50–100
+  point series is unreliable for the LLM to transcribe verbatim — solve via downsampling or A2UI
+  data-model binding (`updateDataModel`) rather than literal props.
+- Interactive **30/60/90/ALL window toggle** on the trend (re-requests the detail with a `days`
+  param — needs an action like `set_window:<bookId>:<days>` + a small extension to the app's
+  action→text bridge).
 - `GradeVarianceRow` — per-grade row: grade · price · mini-sparkline · HIGH/MED/LOW demand.
-- `CompsTable` — recent transactions (date · source·grade · right-aligned price); binds recent `sales[]`.
+- Watchlist row enrichments (inline sparkline + ▲/▼ change) once `get_watchlist` computes per-book
+  change.
 
 ## Data source
 

@@ -288,11 +288,12 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // Regex-extracts every <a2ui-json>…</a2ui-json> block from [text], decodes
-  // each as an A2uiMessage, and injects it via addMessage.
+  // each, and injects it via addMessage. Decodes all blocks first so we can
+  // guard against a missing createSurface (see below) before injecting.
   void _injectA2uiFromBuffer(String text) {
     final regex = RegExp(r'<a2ui-json>([\s\S]*?)</a2ui-json>', multiLine: true);
-    var found = 0;
     final seen = <String>{};
+    final blocks = <Map<String, Object?>>[];
     for (final match in regex.allMatches(text)) {
       final jsonStr = match.group(1)?.trim();
       if (jsonStr == null || jsonStr.isEmpty) continue;
@@ -305,16 +306,46 @@ class _ChatPageState extends State<ChatPage> {
           debugPrint('[A2UI fallback] decoded JSON is not a Map: $decoded');
           continue;
         }
-        final jsonMap = Map<String, Object?>.from(decoded);
-        debugPrint(
-          '[A2UI fallback] injecting block ${found + 1}: '
-          '${jsonMap.keys.toList()}',
-        );
-        final msg = A2uiMessage.fromJson(jsonMap);
-        _transport.addMessage(msg);
-        found++;
+        blocks.add(Map<String, Object?>.from(decoded));
       } catch (e, st) {
         debugPrint('[A2UI fallback] parse error: $e\n$st');
+      }
+    }
+
+    // Guard: the model intermittently omits the createSurface block and emits
+    // only updateComponents. SurfaceController buffers updateComponents until it
+    // sees createSurface for that surfaceId, so a miss leaves the surface blank
+    // forever. If no block creates a surface but one updates it, synthesize the
+    // createSurface first (re-creating an existing surface is a no-op/replace,
+    // which is what every normal turn already does).
+    final hasCreate = blocks.any((b) => b.containsKey('createSurface'));
+    final updateBlock = blocks.firstWhere(
+      (b) => b.containsKey('updateComponents'),
+      orElse: () => const {},
+    );
+    if (!hasCreate && updateBlock.isNotEmpty) {
+      final surfaceId =
+          (updateBlock['updateComponents'] as Map?)?['surfaceId'] as String? ??
+          'comic_surface';
+      debugPrint(
+        '[A2UI fallback] synthesizing missing createSurface for $surfaceId',
+      );
+      blocks.insert(0, {
+        'version': 'v0.9',
+        'createSurface': {'surfaceId': surfaceId, 'catalogId': comicCatalogId},
+      });
+    }
+
+    var found = 0;
+    for (final jsonMap in blocks) {
+      try {
+        debugPrint(
+          '[A2UI fallback] injecting block ${found + 1}: ${jsonMap.keys.toList()}',
+        );
+        _transport.addMessage(A2uiMessage.fromJson(jsonMap));
+        found++;
+      } catch (e, st) {
+        debugPrint('[A2UI fallback] inject error: $e\n$st');
       }
     }
     if (found == 0) {
