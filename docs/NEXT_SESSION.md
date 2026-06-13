@@ -3,82 +3,75 @@
 > **How to use:** start a new session and say `read docs/NEXT_SESSION.md`. This file is
 > self-bootstrapping — it points you at the rest. Overwrite it as the work moves on.
 
-We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, **interactive
-GenUI (E1) shipped**, and the **design is now reviewed, decided, and locked**. The next body of work
-is **building the custom A2UI catalog** to implement the accepted design. First read `CLAUDE.md`,
-`docs/PRD.md`, `docs/DESIGN_BACKLOG.md`, `agent/CLAUDE.md`, `app/CLAUDE.md`.
+We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, the **custom A2UI
+catalog is BUILT** (the watchlist + the rich Book Detail render to the Ink & Equity design), and the
+SSE transport limit is lifted. The next body of work is **step 3 — applying the full theme + screen
+model (app shell)**. First read `CLAUDE.md`, `app/CLAUDE.md`, `agent/CLAUDE.md`,
+`shared/catalog/comic_catalog_v1.md`, `docs/PRD.md`, `docs/DESIGN_BACKLOG.md`.
 
 ## What's working now (all on `main`)
 
-- **Spike C backfill: COMPLETE.** Firestore holds **785 real eBay sales** across all 12 books.
-- **`get_price_history(book_id, days, grade?)`: BUILT** (`agent/comic_sales/tools/price_history.py`).
-- **E1 — Interactive GenUI (tap drill-in): SHIPPED.** Watchlist auto-loads as the home screen (D6);
-  tap a comic → detail (summary + "Median Graded Sales"); "← Watchlist" backs out. Renders via
-  BasicCatalog (Card/Row/Column/Text/Button), intentionally lean.
+- **785 real eBay sales** across all 12 books in Firestore; `get_price_history(book_id, days, grade?)`
+  built (`agent/comic_sales/tools/price_history.py`).
+- **Transport: non-streaming `message/send`** — the ~9 KB SSE truncation is gone; rich payloads are
+  safe (`app/lib/main.dart`, `app/CLAUDE.md` → "Transport").
+- **Custom A2UI catalog SHIPPED** (`app/lib/catalog/comic_catalog.dart`, tokens in
+  `app/lib/theme/ink_equity.dart`, contract in `shared/catalog/comic_catalog_v1.md`):
+  WatchlistRow, NavLink, MetricCard, MetricCluster, **TrendChart** (right Y-axis, dynamic 1..days
+  X-axis, faint grid, area fill), Sparkline, **WindowToggle** (30/60/90/ALL), GradeTierMatrix,
+  GradeVarianceRow (per-grade sparkline + HIGH/MED/LOW demand), CompsTable.
+- **Book Detail = the dynamic market view:** NavLink back → FMV hero (median) → Last/Median/Range →
+  Price Trend + window toggle + chart → GradeTierMatrix → Grade Variance → Recent Sales. Tap a
+  watchlist row to drill in; the window toggle re-queries by `days`.
+- **Chart series via A2UI data-model binding** (`updateDataModel` → `{path}` ref); prices normalized
+  in-widget (`_money`) to comma-grouped, always-2-decimal, right-justified.
+- **Robustness:** synthetic-`createSurface` guard (no permanent blank when the model skips it) +
+  `NavLink` replacing the fragile BasicCatalog `Button`.
 
-## Design is locked — build to this
+## Design is locked — build to this (PRD + DESIGN_BACKLOG D1–D13)
 
-- **Spec:** `docs/PRD.md` (reconciled to all decisions) + `docs/DESIGN_BACKLOG.md` (decisions
-  **D1–D13** — authoritative). Design pass + tokens: `docs/design/stitch-v1/` ("Ink & Equity").
-- **Design system of record (LOCKED, D12):** "Ink & Equity" — bone `#F9F7F2`, charcoal `#1A1B1C`,
-  graphite `#5E6266`, terracotta accent `#BD472A`, muted up `#2D7A4D` / down `#C9302C`; Inter with
-  **tabular+lining** figures; flat, sharp 0px corners. → a Flutter `ThemeData`.
-- **Accepted screen model (D7–D13):**
-  - Name **Comic Sales Agent**; **FMV ≡ median** (D7/D8).
-  - **Dashboard** = list of ≤**12** tappable rows + **footer: ⚙ gear (Manage: add/remove
-    conversationally) + "$" (Update Sales)**; **no persistent dashboard text input** (D10/D11/D13).
-  - **Book Detail = the dynamic market view** (no separate Market Trends screen, D9): FMV hero →
-    MetricCards → 30/60/90 toggle + trend line chart → GradeTierMatrix → Grade-Variance rows →
-    Recent Transactions.
-  - **Manage** (gear) + **Welcome/first-run** are the only places with a text field.
+- **Ink & Equity (D12):** bone `#F9F7F2`, charcoal `#1A1B1C`, graphite `#5E6266`, terracotta
+  `#BD472A`, up `#2D7A4D` / down `#C9302C`; **Inter** with tabular+lining figures; 0px corners. The
+  custom widgets already self-style with these tokens; step 3 bundles the font + themes the app shell.
+- **Screen model (D7–D13):** name **Comic Sales Agent**; **FMV ≡ median** (done in the detail);
+  **Dashboard** = ≤**12** tappable rows + **footer: ⚙ Manage / "$" Update Sales**, no persistent
+  dashboard text input; **Manage** (gear) + **Welcome/first-run** are the only text-field places.
 
 ## ⚠️ Read before touching the agent prompt or app render path
+Hard-won gotchas live in the CLAUDE.md files — don't rediscover them:
+- `app/CLAUDE.md` → Transport (message/send), the `_injectA2uiFromBuffer` fallback + tolerant parse +
+  synthetic-createSurface guard, the custom catalog (3 catalogIds, NavLink-over-Button, `_money`),
+  data-model binding, action→text bridge, the FIFO dev loop (catalog changes need a COLD relaunch).
+- `agent/CLAUDE.md` → callable instruction, disable-thinking, A2UI emission order (createSurface →
+  updateDataModel → updateComponents), `comic_surface` drill-in, ADK `session.db` recovery.
 
-Hard-won gotchas (documented — don't rediscover):
-- `agent/CLAUDE.md` → "Interactive GenUI" + "CRITICAL rendering constraints" + ADK SQLite
-  `session.db` recovery.
-- `app/CLAUDE.md` → "Interactive GenUI (app side)" (dual-catalog, action→text bridge, tolerant JSON
-  repair, scroll-to-top) + "Dev loop — FIFO hot-reload harness".
-- **Former top constraint (NOW RESOLVED):** `a2a 4.2.0` truncated a single A2UI SSE event at ~9 KB.
-  The app no longer streams — it sends via non-streaming `message/send` (`_a2aClient.messageSend` in
-  `main.dart`), which returns the whole `Task` payload in one HTTP body with no cap. Rich screens
-  are unblocked; the lean single-`Text` constraint is lifted. See `app/CLAUDE.md` → "Transport".
+## Next actions — implementation sequence (steps 1 & 2 are DONE)
 
-## Next actions — implementation sequence (steps 1, 1.5 & 2 are DONE)
-
-1. ✅ **DONE — Lifted the ~9 KB SSE size limit.** The app was migrated off streaming
-   `message/stream` to non-streaming **`message/send`** in `app/lib/main.dart` (`_sendNonStreaming`,
-   built on a dedicated `a2a.A2AClient`; A2UI text is read from `task.artifacts[].parts`).
-   Verified end-to-end; a 27 KB detail response arrives intact. The lean single-`Text` constraint is gone.
-2. ✅ **DONE — Built the custom A2UI catalog** (`app/lib/catalog/comic_catalog.dart`, tokens in
-   `app/lib/theme/ink_equity.dart`, contract in `shared/catalog/comic_catalog_v1.md`). Shipped:
-   **WatchlistRow, NavLink, MetricCard, MetricCluster, TrendChart, Sparkline, WindowToggle,
-   GradeTierMatrix, GradeVarianceRow, CompsTable.** The watchlist renders as custom rows; Book
-   Detail is the rich market view (FMV hero → cluster → Price Trend + 30/60/90/ALL toggle →
-   GradeTierMatrix → Grade Variance → Recent Sales). Chart series use **A2UI data-model binding**
-   (`updateDataModel` → `{path}` ref) — verified exact for a 71-pt series. Robustness fixes landed:
-   synthetic-`createSurface` guard + `NavLink` replacing the fragile BasicCatalog `Button`. All
-   verified on the simulator. Commits `7d69c95`, `5df8579`, `74a9401`, `5e43a31`.
-3. **← NEXT: Apply the tokens + screen model.** Full Flutter `ThemeData` from Ink & Equity (bundle
-   Inter); wire the dashboard footer (⚙ Manage + "$" Update Sales), the Manage view, the 12-book
-   limit. (FMV=median hero is already done in the detail.) The custom widgets already self-style with
-   the tokens; this step is the app shell (app bar, footer, input bar, Manage screen) + the font.
+1. ✅ **DONE — Lifted the ~9 KB SSE limit** (migrated to non-streaming `message/send`).
+2. ✅ **DONE — Built the custom A2UI catalog** (all 10 widgets above + the trend-chart axes/grid and
+   consistent price formatting). Verified end-to-end on the simulator. Commits `7d69c95`, `5df8579`,
+   `74a9401`, `5e43a31`, `0eaca4d`.
+3. **← NEXT: Apply the tokens + screen model (app shell).** Full Flutter `ThemeData` from Ink &
+   Equity + bundle the **Inter** font; wire the dashboard **footer** (⚙ Manage + "$" Update Sales),
+   the **Manage** view, and enforce the **12-book** limit. (FMV=median hero is already done.) The
+   custom widgets self-style; this step is the app shell (app bar, footer, input bar, Manage screen)
+   + the font asset.
 4. **Still-open non-UX Phase 3:** the `refresh_sales` ADK tool wired to the "$" Update Sales icon
    (non-blocking, `caffeinate`-wrapped, local-only). `docs/tufte-infographics.md` is still a stub.
 
-> Minor catalog polish deferred (see `shared/catalog/comic_catalog_v1.md` "known nits"): watchlist
-> row inline sparkline + ▲/▼ change (needs per-book change in `get_watchlist`); grades sometimes
-> render `8` vs `8.0`.
-
-> Remaining open *design* questions (PRD §14): guided-add vs conversation in Manage; grade-at-a-glance
-> on the row; sparse/empty grades; the Manage view's shape; dark-mode tokens. Resolve as they come up.
+> **Minor catalog polish deferred** (`shared/catalog/comic_catalog_v1.md` "known nits"): watchlist-row
+> inline sparkline + ▲/▼ change (needs per-book change in `get_watchlist`); grades occasionally
+> render `8` vs `8.0`; with the current densely-recent data, 30/60/90 windows look alike (the toggle
+> still re-queries correctly).
+> **Open design questions** (PRD §14): guided-add vs conversation in Manage; the Manage view's shape;
+> sparse/empty grades; dark-mode tokens. Resolve as they come up.
 
 ## Dev loop / conventions
-
 - Run agent: `cd agent && source .venv/bin/activate && adk api_server --a2a --port 8001 comic_sales`.
-  Run app: `flutter run -d <sim> --dart-define=AGENT_URL=http://127.0.0.1:8001` (FIFO hot-reload
-  harness in `app/CLAUDE.md`). Screenshots: `xcrun simctl io booted screenshot`.
-- If the agent throws `database is locked` / stale-session: `rm -f agent/comic_sales/.adk/session.db*`,
-  run ONE agent, don't hammer it with parallel requests.
-- Commit directly to `main` (solo prototype). Network calls (eBay/Firestore/Gemini) need the
-  sandbox disabled.
+  Run app: `flutter run -d <sim> --dart-define=AGENT_URL=http://127.0.0.1:8001` (FIFO harness in
+  `app/CLAUDE.md`). Screenshots: `xcrun simctl io booted screenshot`. **Catalog/initState changes need
+  a cold relaunch** (hot reload won't update catalog widgetBuilders).
+- Agent `database is locked` / stale-session: `rm -f agent/comic_sales/.adk/session.db*`, run ONE
+  agent, don't hammer it.
+- Commit directly to `main` (solo prototype). Network calls (eBay/Firestore/Gemini) need the sandbox
+  disabled.

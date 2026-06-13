@@ -128,21 +128,27 @@ history (per book, and per grade).
 The product is composed from a small, deliberate set of widgets. **Design new screens primarily
 from these building blocks** (and propose additions when needed — additions extend the catalog).
 
-| Widget | Role | Visual intent |
+| Widget | Role | Status |
 |---|---|---|
-| **WatchlistRow** | One comic in the list | Title/issue left, latest price right, inline sparkline; tappable; no gridlines |
-| **Sparkline** | Word-sized trend line | A tiny inline trend; single accent dot for the latest/anomalous point |
-| **MetricCard** | One number + label (+ optional delta) | E.g. "Median $1,000 ▲ +12%"; no borders/shadows |
-| **GradeTierMatrix** | Grade × recent-sales grid | The centerpiece for grade analysis; GitHub-contribution-style density |
-| **SmallMultiplesGrid** | Repeated mini-charts | Compare books or grades at a glance (macro + micro) |
-| **TextBlock** | Fallback prose | Used sparingly — welcome copy, explanations; never the default |
+| **WatchlistRow** | One comic in the list — title/issue left, last price right; tappable | ✅ Built |
+| **NavLink** | Self-contained tappable link (e.g. "← Watchlist" back) | ✅ Built |
+| **MetricCard** | One number + label (+ optional delta); `hero` for the FMV headline | ✅ Built |
+| **MetricCluster** | A roomy row of compact metrics (Last / Median / Range) | ✅ Built |
+| **TrendChart** | Price line w/ right Y-axis, dynamic 1..days X-axis, faint grid, area fill, terracotta latest dot | ✅ Built |
+| **Sparkline** | Word-sized inline trend line (used in GradeVarianceRow) | ✅ Built |
+| **WindowToggle** | 30/60/90/ALL trend time-window selector | ✅ Built |
+| **GradeTierMatrix** | Grade × volume density grid (the grade-analysis centerpiece) | ✅ Built |
+| **GradeVarianceRow** | Per-grade trend: grade · median · mini-sparkline · HIGH/MED/LOW demand | ✅ Built |
+| **CompsTable** | Recent transactions (date · source·grade · right-aligned price) | ✅ Built |
 
-> **Status:** Today the app renders with **basic primitives only** (Card / Row / Column / Text /
-> Button) — the custom data-ink widgets above (Sparkline, GradeTierMatrix, SmallMultiplesGrid) are
-> **Target/Planned**. Wireframe the target widgets; we'll build them into the catalog as we go.
+> **Status:** the custom A2UI catalog is **built** (`app/lib/catalog/comic_catalog.dart`; contract in
+> `shared/catalog/comic_catalog_v1.md`). Widgets self-style with the Ink & Equity tokens
+> (`app/lib/theme/ink_equity.dart`); the agent binds data, the widget owns the look. A
+> `SmallMultiplesGrid` (compare books/grades) remains a possible future addition.
 >
 > **Design system of record (LOCKED, D12): "Ink & Equity"** — see `docs/design/stitch-v1/DESIGN.md`
-> and §11. These widgets get styled with those tokens.
+> and §11. Remaining design work is the **app shell** theme (app bar, footer, Manage view) + bundling
+> the Inter font (step 3).
 
 ---
 
@@ -185,15 +191,16 @@ from these building blocks** (and propose additions when needed — additions ex
 
 For each: purpose, content, components, interactions, and states. **Built** vs **Target** is marked.
 
-### 8.1 Home — Watchlist (populated)  · *Built (lean), Target (rich)*
+### 8.1 Home — Watchlist (populated)  · *Built (custom WatchlistRow), Target (footer + sort chips)*
 - **Purpose:** the default landing view; see every tracked comic (up to **12**, D11) and its latest
   value at a glance.
-- **Content per row:** title + issue, publisher, owned grade badge (e.g. "CGC 9.4" or "Raw"), and
-  **last sale price** (right-aligned, tabular). *Target:* an inline **Sparkline** and a price-move
-  ▲/▼ accent.
-- **Components:** a vertical list of **WatchlistRow**s (each tappable). **Sort chips** (Value / Mover
-  / Grade / Recent / Year).
-- **Footer (D10/D13):** **⚙ gear → Manage** (add/remove comics) on the left; **"$" → Update Sales**
+- **Content per row:** title + issue, owned grade badge (e.g. "CGC 9.4" or "Raw"), and **last sale
+  price** (right-aligned, 2-decimal, tabular). *Target:* an inline **Sparkline** and a price-move
+  ▲/▼ accent (the WatchlistRow already accepts a `change` field; awaits per-book change in
+  `get_watchlist`).
+- **Components:** a vertical list of **WatchlistRow**s (each tappable). *Target:* **Sort chips**
+  (Value / Mover / Grade / Recent / Year).
+- **Footer (D10/D13) — *Target (step 3):*** **⚙ gear → Manage** on the left; **"$" → Update Sales**
   on the right. **No text input on the dashboard.**
 - **Interactions:** tap a row → Book Detail; tap gear → Manage; tap "$" → Update Sales.
 - **States:** loading (spinner while the watchlist loads on launch); error (a single card explaining
@@ -210,23 +217,25 @@ For each: purpose, content, components, interactions, and states. **Built** vs *
 - **Target enhancement:** consider a light, guided **"Add your first comic"** affordance (a tappable
   prompt or a simple field set) in addition to free typing.
 
-### 8.3 Book Detail — the dynamic market view  · *Built (lean), Target (rich, grade-forward)*
+### 8.3 Book Detail — the dynamic market view  · *✅ Built (rich, grade-forward)*
 > **This is the market view (D9).** There is no separate "Market Trends" screen; the trend chart and
 > grade-variance live here. A single, scrollable, grade-forward screen per book.
 - **Purpose:** understand a single comic's current market — value, trend over time, and by grade.
-- **Content, top → bottom:**
-  1. **Back affordance** — "← Watchlist".
-  2. **Header** — title + issue, publisher · date (secondary).
-  3. **FMV hero** — the **Fair Market Value = median price** (D8), large/tabular, with % change.
-  4. **Metric cluster** — **MetricCard**s: Last sale, Median (90D), 90-day Range (min–max), 30-day
-     trend **Sparkline**. (Avoid the cramped 2×2 wrap seen in the mockup — give numbers room.)
-  5. **Trend** — a **time-window toggle (30 / 60 / 90 / ALL)** + a large, axis-less **line chart**
-     with a terracotta latest-point dot.
-  6. **GradeTierMatrix** — grade × volume grid, intensity shading; the centerpiece for grade analysis.
-  7. **Grade Variance** — per-grade rows (grade · price · mini-sparkline · HIGH/MED/LOW demand) — the
-     "9.8s softening vs 9.4s strengthening" insight.
-  8. **Recent Transactions** — comps table (date · source·grade · right-aligned price).
-  - *Target later:* raw-vs-graded comparison; edition (newsstand/direct) notes.
+- **Content, top → bottom (all built):**
+  1. **Back affordance** — **NavLink** "← Watchlist".
+  2. **Header** — title + issue.
+  3. **FMV hero** — **MetricCard** (`hero`): **Fair Market Value = median price** (D8), large/tabular,
+     with % change.
+  4. **Metric cluster** — **MetricCluster**: Last sale, Median, Range (min–max).
+  5. **Trend** — **WindowToggle (30 / 60 / 90 / ALL)** + **TrendChart**: a line chart with a
+     right-hand price axis, a dynamic 1..days X-axis, a faint grid, an area fill, and a terracotta
+     latest-point dot. The toggle re-queries `get_price_history` by `days`.
+  6. **GradeTierMatrix** — grade × volume density (intensity bars); the grade-analysis centerpiece.
+  7. **Grade Variance** — **GradeVarianceRow** per top grade (grade · median · mini-Sparkline ·
+     HIGH/MED/LOW demand) — the "9.8s softening vs 9.4s strengthening" insight.
+  8. **Recent Transactions** — **CompsTable** (date · source·grade · right-aligned price).
+  - *Target later:* raw-vs-graded comparison; edition (newsstand/direct) notes; per-point date
+    positioning on the trend (points are currently evenly spaced across the window).
 - **Interactions:** tap "← Watchlist" → Home; change the window toggle; (optional) refine via the
   Manage/agent path ("how are the 9.8s trending?").
 - **States:** loading; "no recent sales for this book" (graceful empty / sparse grades); error.
@@ -361,27 +370,27 @@ The design system of record is **"Ink & Equity"** from the Stitch v1 pass
   tap away, not omnipresent.
 - **Data is real and grade-keyed.** ~90-day eBay sold history; not every book has sales at every
   grade — design for sparse/empty grades gracefully.
-- **Current technical limit (improving):** the present rendering path caps a single view's payload
-  size, so the *shipped* watchlist/detail are intentionally lean (single text lines). This is a
-  known limitation we plan to lift; **design for the rich target** — just know the first
-  implementation may approximate it while the constraint is removed.
+- **Former technical limit (RESOLVED):** the old streaming transport capped a single view's payload
+  (~9 KB), which once forced lean single-text renders. The app now uses non-streaming `message/send`
+  with no cap, so the rich catalog renders in full.
 
 ---
 
 ## 13. Current status snapshot (built vs target)
 
 **Built & working (verified in the iOS simulator):**
-- Watchlist as auto-loading home; welcome/empty state; tappable rows.
-- Drill-in to a Book Detail with price summary + "Median Graded Sales" per-grade lines; "← Watchlist"
-  back.
-- Conversational add/edit/remove; real ~90-day eBay sales for 12 books in the database.
-- Loading/error handling.
+- Watchlist as auto-loading home (custom **WatchlistRow**); welcome/empty state; tappable drill-in.
+- The rich **Book Detail**: NavLink back, FMV hero, MetricCluster, WindowToggle (30/60/90/ALL) +
+  axed TrendChart, GradeTierMatrix, GradeVarianceRow (demand), CompsTable — styled to Ink & Equity.
+- The full **custom A2UI catalog** (10 widgets); chart series via data-model binding; consistent
+  2-decimal price formatting.
+- Conversational add/edit/remove; real ~90-day eBay sales for 12 books; loading/error handling.
 
-**Target / planned (the design + build runway):**
-- The rich data-ink catalog (Sparkline, MetricCard, GradeTierMatrix, SmallMultiplesGrid) and the
-  price-history/trend exploration screens.
-- "Update Sales" refresh UI; sort/filter chips; guided add.
-- Design system (type/color/spacing, dark mode), app identity.
+**Target / planned (the runway):**
+- **Step 3 — app shell:** full `ThemeData` + bundled Inter font; the dashboard **footer** (⚙ Manage /
+  "$" Update Sales); the **Manage** view; the 12-book limit; sort/filter chips; guided add.
+- "Update Sales" refresh (`refresh_sales` tool wired to "$"); watchlist-row sparkline + ▲/▼ change.
+- Possible `SmallMultiplesGrid`; dark-mode tokens; app identity.
 - (v2) Price-alert notifications.
 
 ---

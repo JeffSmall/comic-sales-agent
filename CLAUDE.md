@@ -35,7 +35,7 @@ comic-sales-agent/
 │  └─ compact-instructions.md  # full phase history for /compact
 ├─ agent/                 # Python ADK agent — see agent/CLAUDE.md
 ├─ app/                   # Flutter iOS app — see app/CLAUDE.md
-└─ shared/catalog/        # A2UI widget catalog contract (TBD — custom catalog Phase 3)
+└─ shared/catalog/        # comic_catalog_v1.md — the custom A2UI widget contract (BUILT)
 ```
 
 ## Build / run commands

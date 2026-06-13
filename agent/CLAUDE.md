@@ -1,275 +1,119 @@
 # agent/ — Python ADK Agent
 
-## Current state (Phase 1 complete)
-
-The agent is fully working. Spike A gate passed: the agent emits valid A2UI JSON for the
-hardcoded comic watchlist, and the Flutter app renders it as native widgets.
+Hosts a Gemini conversation over A2A and emits A2UI that the Flutter app renders as native widgets.
+Reads/writes the Firestore watchlist + price history via function tools and composes the **custom
+A2UI catalog** (contract: `shared/catalog/comic_catalog_v1.md`; widgets live in `app/`). All of the
+catalog UI is hand-authored in the `agent.py` system prompt (the agent binds data; the widgets own
+the look).
 
 ## Structure
-
 ```
 agent/
-├─ CLAUDE.md              ← you are here
-├─ comic_sales/           # ADK agent module (folder name = A2A URL segment)
-│  ├─ __init__.py
-│  ├─ agent.py            # Root agent definition (registers Firestore tools)
-│  ├─ agent.json          # A2A agent card (required by adk api_server --a2a)
-│  ├─ firestore_client.py # Lazy Firestore client singleton (ADC)
+├─ comic_sales/            # ADK module (folder name = A2A URL segment)
+│  ├─ agent.py             # Root agent: callable instruction, A2UI system prompt, registers tools
+│  ├─ agent.json           # A2A agent card (required by adk api_server --a2a)
+│  ├─ firestore_client.py  # Lazy Firestore singleton (ADC, reads FIRESTORE_PROJECT)
 │  └─ tools/
-│     ├─ __init__.py
-│     └─ watchlist.py     # ADK function tools: get_watchlist, upsert_comic, remove_comic, add_sale
+│     ├─ watchlist.py      # get_watchlist, upsert_comic, remove_comic, add_sale
+│     └─ price_history.py  # get_price_history(book_id, days, grade?) → summary/by_grade/sales
 ├─ tools/
-│  ├─ seed_watchlist.py   # One-time idempotent seed/migration of Phase-1 books → Firestore
-│  └─ backfill_sales.py   # Phase 3 Spike C — eBay sold-listings scraper → Firestore sales
-├─ .env                   # GOOGLE_API_KEY=..., FIRESTORE_PROJECT=... (gitignored)
-├─ pyproject.toml         # Python deps managed by uv
-└─ .venv/                 # Virtual environment (gitignored)
+│  ├─ seed_watchlist.py    # one-time idempotent Firestore seed/migration
+│  └─ backfill_sales.py    # eBay sold-listings scraper → Firestore sales (see "Backfill")
+├─ .env                    # GOOGLE_API_KEY, FIRESTORE_PROJECT (gitignored)
+└─ pyproject.toml          # uv-managed deps
 ```
 
-## How to run
-
+## Run
 ```bash
-cd agent
-source .venv/bin/activate
-adk api_server --a2a --port 8001 comic_sales
+cd agent && source .venv/bin/activate
+adk api_server --a2a --port 8001 comic_sales   # registers at /a2a/comic_sales
 ```
+NOT `adk web` — it exposes only `/run_sse`; the Flutter GenUI SDK requires the A2A protocol.
 
-The agent registers at `http://127.0.0.1:8001/a2a/comic_sales`.
+## Dependencies (uv, not pip — `uv sync`)
+- `google-adk==2.2.0` · `a2ui-agent-sdk` (`A2uiSchemaManager`, `BasicCatalog`) ·
+  `a2a-sdk[http-server]==0.3.6` · `google-cloud-firestore`.
+- `[backfill]` extra (`curl-cffi`, `beautifulsoup4`, `lxml`) — `uv sync --extra backfill`; kept out
+  of the deployed runtime.
+> **`[http-server]` is load-bearing.** Plain `a2a-sdk` prunes `starlette`/`sse-starlette` and
+> `adk api_server --a2a` fails: "Packages starlette and sse-starlette are required."
 
-Do NOT use `adk web` — it exposes a proprietary `/run_sse` endpoint that the Flutter
-GenUI SDK cannot speak. Only `adk api_server --a2a` exposes the A2A protocol.
+## Firestore auth
+GCP project **`comic-sales-agent`** (Native mode, `nam5`), **Application Default Credentials** (no
+key file): `gcloud auth application-default login`. ADK loads `agent/.env`
+(`FIRESTORE_PROJECT=comic-sales-agent`); standalone scripts must pass the var explicitly.
 
-## Dependencies
-
-Managed by `uv` (not pip). Key packages:
-- `google-adk==2.2.0`
-- `a2ui-agent-sdk` (provides `A2uiSchemaManager`, `BasicCatalog`)
-- `a2a-sdk[http-server]==0.3.6` (required by `adk api_server --a2a`)
-- `google-cloud-firestore` (Phase 2 — watchlist persistence)
-- `[backfill]` extra: `curl-cffi`, `beautifulsoup4`, `lxml` (Phase 3 Spike C scraper —
-  `uv sync --extra backfill`; kept out of the deployed runtime)
-
-To install: `uv sync`
-
-> **The `[http-server]` extra is load-bearing.** If `pyproject.toml` pins plain `a2a-sdk`,
-> `uv sync` prunes `starlette`/`sse-starlette` and `adk api_server --a2a` then fails at startup
-> with "Failed to setup A2A agent … Packages starlette and sse-starlette are required."
-
-## Firestore auth (Phase 2)
-
-The agent reads/writes Firestore in GCP project **`comic-sales-agent`** (Native mode, `nam5`)
-using **Application Default Credentials** — no service-account key file. Set up locally once:
-
-```bash
-gcloud auth application-default login
-```
-
-`agent/.env` carries `FIRESTORE_PROJECT=comic-sales-agent`. ADK loads `.env`, so the running
-server picks it up; standalone scripts (e.g. the seed) need the var passed explicitly.
-
-## How the agent works
-
-`agent.py` does three things:
-
-1. **Builds the system prompt** using `A2uiSchemaManager` with `BasicCatalog`. The prompt
-   instructs Gemini to respond with A2UI JSON wrapped in `<a2ui-json>` tags.
-
-2. **Injects the hardcoded watchlist** as a text block into the prompt so the model can
-   reason about the data without tool calls (Phase 1 only — Phase 2 replaces this with
-   Firestore tool calls).
-
-3. **Declares the root agent** with a callable instruction (not a plain string).
+## Tools (each catches all exceptions and returns `{"status":"error",...}`)
+A raised exception aborts the A2A turn silently — the app then shows nothing.
+- `get_watchlist()` — all `watchlist/{bookId}` docs; derives `last_sale` from the `sales`
+  subcollection (prices are NOT stored flat — CPCD §9). Call before showing/answering about the list.
+- `upsert_comic(title, issue, book_id?, ...)` — create/edit; **partial update** (only provided
+  fields written); empty book_id ⇒ slug from title+issue.
+- `remove_comic(book_id)` — deletes the doc + its `sales` subcollection (no cascade).
+- `add_sale(book_id, price, ...)` — appends a user-entered sale.
+- `get_price_history(book_id, days=90, grade=0)` — summary, per-grade breakdown, chronological
+  sales; the basis for the detail view + charts.
 
 ## Critical implementation details
+- **Callable instruction (DO NOT make it a plain string).** `instruction=instruction` where
+  `def instruction(_ctx)->str`. ADK template-substitutes `{…}` tokens in string instructions,
+  destroying the embedded A2UI JSON (`KeyError: Context variable not found: expression`).
+- **Disable thinking (CRITICAL).**
+  `GenerateContentConfig(thinking_config=ThinkingConfig(thinking_budget=0))`. With tools + the large
+  A2UI prompt, gemini-2.5-flash thinking returns an EMPTY completion (~25% of turns) → blank render.
+- **Model:** `gemini-2.5-flash` only. `gemini-2.0-flash` is decommissioned (404).
 
-### Callable instruction (DO NOT change to a plain string)
+## A2UI emission (custom catalog — see `shared/catalog/comic_catalog_v1.md`)
+Single surface `comic_surface`, drill-in: every turn re-renders it (REPLACE, no growing stack).
+Emit each A2UI message in its OWN `<a2ui-json>` block, **in order**:
+1. **createSurface** with `catalogId: "com.comicsales.catalog.v1"` — never skip it (the controller
+   buffers updateComponents until it sees createSurface; the app also synthesizes one if it's missing).
+2. **updateDataModel** (DETAIL only) — one per bound chart series: the overall trend at `/trend` and
+   one per `GradeVarianceRow` grade at `/g_<grade>`. Values are plain numbers, oldest first, copied
+   EXACTLY from `get_price_history.sales[]`. Emit BEFORE updateComponents so the bindings resolve.
+3. **updateComponents** — the component tree.
 
-```python
-def instruction(_context) -> str:
-    return _INSTRUCTION
+- **WATCHLIST** ("show me my watchlist" / a back tap): `get_watchlist()`, then a Column of one
+  `WatchlistRow` per comic (bookId/title/subtitle/price). Empty ⇒ a welcome Column prompting the
+  user to type their first comic into the input bar.
+- **DETAIL** ("show price history and details for book_id X", optionally "… for the last N days" /
+  "… for all available history"): pick the window (30/60/90; ALL⇒3650), call
+  `get_price_history(book_id=X, days=window)`, then a Column: NavLink back → title Text → MetricCard
+  hero (FMV = median) → MetricCluster (Last/Median/Range) → "Price Trend" + WindowToggle + TrendChart
+  (`points`={path:/trend}, `days`=window) → GradeTierMatrix → "Grade Variance" (one GradeVarianceRow
+  per top grade, demand from its first→last change) → CompsTable (recent sales).
+- **Navigation = the action NAME**: `view_book:<book_id>`, `view_book:<id>:<window>`,
+  `view_watchlist`. Custom widgets dispatch these; the app maps them back to a text request (see
+  `app/CLAUDE.md` "action→text bridge"). Use `NavLink`/custom widgets, NOT BasicCatalog `Button` —
+  Button needs its child as a separate component by id, which the model inlines → "Invalid child".
+- On a tool `{"status":"error"}`, render ONE Card explaining the failure in plain language.
 
-root_agent = Agent(
-    name="comic_sales_agent",
-    model="gemini-2.5-flash",
-    instruction=instruction,   # callable, not a string
-)
-```
+> **SSE ~9 KB limit RESOLVED.** The app uses non-streaming `message/send`, so the old "keep renders
+> to single Text lines" constraint is **lifted** — rich payloads return intact.
 
-ADK template-substitutes `{…}` tokens in plain string instructions. The A2UI system
-prompt contains JSON schema with `{…}` everywhere, which causes:
-`KeyError: Context variable not found: expression`
+## ADK SQLite session store (`comic_sales/.adk/session.db`) — operational gotcha
+ADK 2.2.0 stores A2A sessions in SQLite there. **`database is locked`** (concurrent curls + app, or
+a SIGKILL mid-request) or **stale-session** errors ⇒ stop the agent,
+`rm -f comic_sales/.adk/session.db*` (safe — only A2A conversation state; the watchlist is in
+Firestore), start ONE agent, don't hammer it with parallel requests.
 
-### createSurface must precede updateComponents
+## Vendor patch (re-apply after `uv sync`)
+`agent/.venv/.../google/adk/cli/fast_api.py` ~L748: inside `if gemini_enterprise_app_name:` change
+`import json` → `import json as _json` (the local import shadows the module-level `json` →
+`cannot access local variable 'json'`).
 
-The system prompt explicitly instructs the model to always emit a `createSurface` block
-first, then `updateComponents`. The `catalogId` must exactly match what the Flutter
-`BasicCatalogItems.asCatalog()` uses:
-
-```
-https://a2ui.org/specification/v0_9/basic_catalog.json
-```
-
-The Python `a2ui-agent-sdk` uses a different default catalogId — do not use it.
-
-### Model
-
-Use `gemini-2.5-flash`. `gemini-2.0-flash` is deprecated and returns 404.
-
-**Disable thinking (Phase 2, CRITICAL).** The agent sets
-`generate_content_config=GenerateContentConfig(thinking_config=ThinkingConfig(thinking_budget=0))`.
-With the function-calling tools + the large A2UI-schema prompt, gemini-2.5-flash's thinking mode
-intermittently returns an EMPTY completion (0 output tokens, `finish=STOP`) ~25% of the time —
-the agent then renders nothing and the app looks broken. Disabling thinking made it reliable
-(measured 8/8 in-process, 6/6 over A2A vs 6/8 with thinking on). Do not remove this config.
-
-## Vendor patch required
-
-`agent/.venv/lib/python3.12/site-packages/google/adk/cli/fast_api.py` ~line 748:
-
-Change `import json` → `import json as _json` inside the `if gemini_enterprise_app_name:`
-block. Reason: Python hoists the local import to function scope, shadowing the module-level
-`json` and causing `cannot access local variable 'json'` at runtime.
-
-This patch is lost when the venv is rebuilt. Re-apply it after `uv sync`.
-
-## Phase 2 — Firestore watchlist (built)
-
-The hardcoded `WATCHLIST` list is gone. `agent.py` now registers four ADK function tools from
-`comic_sales/tools/watchlist.py` and the system prompt tells the model to call them:
-
-- `get_watchlist()` — reads all `watchlist/{bookId}` docs; derives `recent_prices`/`last_sale`
-  on the fly from each book's `sales` subcollection (prices are NOT stored flat — see CPCD §9).
-- `upsert_comic(title, issue, book_id?, ...)` — create or edit. **Partial update**: only the
-  fields you pass are written, so editing one field never clobbers the others. Empty `book_id`
-  ⇒ a stable slug id is derived from title+issue.
-- `remove_comic(book_id)` — deletes the doc and its `sales` subcollection (Firestore won't
-  cascade).
-- `add_sale(book_id, price, ...)` — appends a user-entered sale to the `sales` subcollection.
-
-The model, server mode (`adk api_server --a2a`), agent card, callable-instruction pattern, and
-the createSurface/`catalogId` rules are all unchanged from Phase 1.
-
-Seed/migrate Phase-1 data once (deterministic ids, safe to re-run):
+## Backfill — eBay sold-listings (`tools/backfill_sales.py`)  ✅ COMPLETE
+785 real sales across all 12 books in Firestore (`sales/{saleId}`). Standalone, `--dry-run` default
+/ `--commit`. Full design lives in `docs/compact-instructions.md`; the load-bearing facts:
+- **Residential IP required** (datacenter/Cloud Run is blocked) → the scraper stays local even after
+  Phase 4. `curl_cffi` (Chrome impersonation) + homepage session-warming clears Akamai; it detects
+  the Imperva challenge and aborts cleanly. Stay low-rate: `--book-interval 900` (~1 book/15 min).
+- Two-stage filter: token heuristic `_matches_book` + optional `--classify` Gemini classifier (fails
+  open). Adds a nullable `edition` per sale (additive beyond CPCD §9).
+- Routine refresh: `--incremental` (scrapes since newest stored sale − 2d; idempotent ids).
 ```bash
-cd agent && source .venv/bin/activate
-FIRESTORE_PROJECT=comic-sales-agent python tools/seed_watchlist.py
+python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 [--commit]
+python tools/backfill_sales.py --classify --incremental --commit          # routine refresh
 ```
-
-## Phase 3 Spike C — eBay sold-listings backfill (`tools/backfill_sales.py`)
-
-A standalone scraper that fills each watchlist book's `sales/{saleId}` subcollection with real
-~90-day eBay completed-sale history, so the Phase 3 visualization catalog has grade-level data.
-Same shape as the seed script (reads the watchlist, writes `sales` docs, idempotent via
-deterministic `ebay-<itemId>` ids), `--dry-run` by default / `--commit` to persist.
-
-**Status: ✅ COMPLETE.** One paced full-sweep (`--book-interval 900 --classify --commit`, ~3 hrs,
-residential IP) landed **785 real sales across all 12 books** (424 graded / 361 raw, verified by
-read-back). No Imperva block — the cool-down + 15-min pacing held. The Spike C gate (≥3 books with
-grade-level sales) is exceeded. Routine refreshes now use `--incremental`.
-
-**How it gets past eBay (the de-risked unknowns):**
-- Plain HTTP is blocked at the **TLS layer** (Akamai) → 403. Fix: **`curl_cffi` impersonating
-  Chrome** + **warm the session** (GET `ebay.com` first to seed `bm_*`/`__uzm*` bot cookies),
-  then the sold-search returns 200. See `EbayClient` in the script.
-- eBay then rate-limits on **request velocity** → Imperva **"Pardon Our Interruption"** challenge,
-  which a pure HTTP client can't solve and re-warming won't clear — only a **cool-down** (15–30
-  min, longer on repeat trips). The client detects it (`EbayBlockedError`) and aborts cleanly.
-- **Stay low-rate, manual:** `--book <id>` = one book (~2 requests); `--book-interval` spaces a
-  sweep (default 900s). One book per ~15 min stays under the threshold.
-- **Residential IP is essential** — a Cloud Run / datacenter IP gets blocked. Don't move this
-  scraper to Cloud Run without a residential proxy (revisits the Phase 4 plan).
-
-**Precision (the genuinely hard part):** two stages — a cheap heuristic (`_matches_book`: the
-book's `title` followed by its `issue` as a standalone `\b`-bounded token, optionally separated by
-a 4-digit publication year — keeps `X-Men (1975) #94` / `Detective Comics 359 1967`, while `#94`
-still rejects `#194`/`#940` — plus a reject list for facsimile/reprint/lot/merch) strips
-wrong-series junk, then an optional **Gemini classifier** (`--classify`) drops homage/variant/reprint
-listings that print the key's name in their own title. Classifier batches titles, runs
-`gemini-2.5-flash` with thinking off, and **fails open** (keeps a borderline rather than dropping a
-real sale). Because the classifier only sees KEPT items, the matcher errs toward recall: an earlier
-space-stripping normalizer ran the issue into a trailing year and over-rejected (only 13/200 kept
-for X-Men #94); the token matcher fixes this. The `grade` regex also tolerates `CGC GRADE 9.8` /
-`CBCS GRADED 9.6` wording.
-
-**Schema note:** adds a nullable **`edition`** (`newsstand`/`direct`/null) to each sale doc — a
-small, additive extension beyond CPCD §9 to support edition-level price analysis.
-
-**Incremental refresh (`--incremental`):** after the first 90-day backfill, this mode scrapes each
-book only since `(newest stored sale_date − 2d)` — the stored sales are the high-water mark, so
-irregular run intervals never leave a gap and idempotent ids make the overlap free. No prior
-sales ⇒ full `--days` fallback; gaps beyond eBay's ~90-day retention are unrecoverable. See
-`_effective_days` / `_newest_sale_date`. (Pacing is unchanged, so a full 12-book incremental
-sweep is still ~3 hrs of mostly-waiting — a background job, not a quick task.)
-
-**Planned `refresh_sales` agent tool + app button (after the backfill lands):** an "Update Sales"
-button in the Flutter app fires a NON-BLOCKING ADK tool that launches the scraper as a detached,
-`caffeinate -i`-wrapped background process (idle system sleep would otherwise suspend a multi-hour
-run; screensaver/display sleep do not). A synchronous multi-hour tool call would time out the A2A
-turn, so it must return immediately. Only works while the agent runs locally (residential IP).
-
-**Deps:** `curl_cffi`, `beautifulsoup4`, `lxml` are in the `[backfill]` extra — install with
-`uv sync --extra backfill` (lost on a clean rebuild; re-run after recreating the venv).
-`google-genai` (for `--classify`) is already an agent dep. The script auto-loads `agent/.env`,
-so no inline `FIRESTORE_PROJECT=` / `GOOGLE_API_KEY=` is needed.
-
-```bash
-cd agent && source .venv/bin/activate
-python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1            # dry-run one book
-python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 --commit   # persist one book
-python tools/backfill_sales.py --classify --book-interval 900 --max-pages 1 --commit     # paced full sweep
-```
-
-## Phase 3 / E1 — Interactive GenUI (tap-to-navigate drill-in)
-
-The agent renders the watchlist and book details as **tappable** A2UI so the user navigates by
-tapping, not typing (see `docs/DESIGN_BACKLOG.md` D1/D2/E1). Implemented entirely in the system
-prompt in `agent.py` (BasicCatalog only — no custom catalog yet). Hard-won conventions:
-
-- **Single-surface drill-in.** Every view renders to ONE surface, `surfaceId: "comic_surface"`
-  (createSurface then updateComponents, every turn). Re-rendering REPLACES the previous view, which
-  gives drill-in navigation with no growing surface stack. (Earlier phases used a different
-  surfaceId per query, which accumulated.)
-- **Tappable items = BasicCatalog `Button`.** BasicCatalog has no "onTap card", but a `Button`
-  (`"variant":"borderless"`) whose `child` is any component IS tappable and dispatches an
-  `action.event`. Watchlist = a Column whose children are one borderless Button per comic; each
-  Button's `child` is a single Text. The Column children are ONLY the Buttons; each Text is the
-  Button's `child`, never also a direct Column child (else it renders twice).
-- **Action payload is encoded in the action NAME**, e.g. `{"event":{"name":"view_book:<book_id>"}}`
-  and `{"event":{"name":"view_watchlist"}}`. We put `book_id` in the name (not `action.event.context`)
-  to skip BasicCatalog's data-context resolution. The app translates the action back to a text
-  request (see `app/CLAUDE.md` "action→text bridge"); the agent just receives a normal text turn
-  ("show price history and details for book_id X" / "show me my watchlist") it already handles.
-- **DETAIL view** (on "show price history … book_id X"): call `get_price_history(book_id=X)`, render
-  top→bottom: (1) a back affordance FIRST — borderless Button, child Text "← Watchlist", action
-  `view_watchlist`; (2) title Text; (3) a few summary Text lines; (4) "Median Graded Sales" then ONE
-  Text line per grade `"<grade>  $<median>  (range $min–$max)"` — the word "Median" lives in the
-  section title, never per row.
-
-### CRITICAL rendering constraints (the source of most "nothing renders" bugs)
-
-- **Keep every render SMALL and SIMPLE — single Text lines in a Column; avoid Row/Card/nesting.**
-  Reason: a single A2UI SSE event is **truncated around ~9 KB** by `a2a 4.2.0`
-  (`a2a_client.dart` reads the body and `json.decode`s each `data:` line). A rich 12-item watchlist
-  (Button→Row→3 Texts) or a ~15-grade detail (Row+2 Texts each) exceeds that, the JSON is cut
-  mid-structure, and the surface renders blank OR with `Widget with id … not found` (dangling child
-  refs). One-Text-per-line keeps payloads ~3–5 KB. The proper fix (lift the limit via non-streaming
-  `message/send`, or a custom catalog) is logged in `docs/DESIGN_BACKLOG.md`.
-- **gemini-2.5-flash intermittently emits invalid JSON** (drops the final `}`), even on small
-  payloads, ~1/3 of the time. The app repairs this (bracket-balancing, see `app/CLAUDE.md`), but
-  keep payloads small so a repair never has to guess across truncated content.
-- **catalogId trap (still live).** The model non-deterministically emits the SDK-default
-  `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json` instead of the BasicCatalog id
-  `https://a2ui.org/specification/v0_9/basic_catalog.json`. The app now registers the catalog under
-  BOTH ids so it resolves either way — do not "fix" this by only emitting one.
-
-### ADK SQLite session store — `comic_sales/.adk/session.db` (operational gotcha)
-
-ADK 2.2.0 keeps A2A conversation sessions in a per-agent **SQLite** db at
-`agent/comic_sales/.adk/session.db`. It is fragile under this project's dev loop:
-- **`database is locked`** — caused by concurrent access (e.g. firing many test `curl`s at the agent
-  while the app is also connected) or by SIGKILLing the agent mid-request (leaves a `.db-journal`).
-- **`ValueError: … stale session`** — the db persists across restarts, so an app contextId from a
-  previous agent process can conflict after a restart.
-- **Recovery:** stop the agent cleanly, then `rm -f comic_sales/.adk/session.db*` (safe — it is only
-  A2A conversation state; the watchlist lives in Firestore), and start ONE agent. Avoid hammering the
-  agent with parallel requests. This is unrelated to the prompt/payload bugs above.
+- **Planned `refresh_sales` ADK tool** (remaining Phase 3): non-blocking, `caffeinate -i`-wrapped
+  detached process wired to the app's "$" Update Sales icon (local-only, residential IP).
