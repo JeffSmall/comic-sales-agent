@@ -11,7 +11,7 @@
 /// copy) with the custom items below, under the id [comicCatalogId].
 library;
 
-import 'dart:math' show max, min;
+import 'dart:math' show ln10, log, max, min, pow;
 
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
@@ -57,6 +57,48 @@ List<Map<String, Object?>> _maps(Object? v) {
     ];
   }
   return const [];
+}
+
+/// Formats a price string consistently: always 2 decimals, comma-grouped, with a
+/// leading `$` — e.g. "$2100" / "$2,100" → "$2,100.00". Handles a range like
+/// "$20.73–$6,499.95" (both sides reformatted). Falls back to the raw string if
+/// it can't find a number. The widgets format prices (not the agent) so display
+/// is consistent regardless of how the model wrote them.
+String _money(String raw) {
+  final t = raw.trim();
+  if (t.isEmpty) return raw;
+  for (final sep in const ['–', '—']) {
+    if (t.contains(sep)) {
+      final parts = t.split(sep);
+      if (parts.length == 2) {
+        final a = _fmtMoney(parts[0]);
+        final b = _fmtMoney(parts[1]);
+        if (a != null && b != null) return '$a$sep$b';
+      }
+    }
+  }
+  return _fmtMoney(t) ?? raw;
+}
+
+String? _fmtMoney(String token) {
+  final n = _num(token);
+  if (n == null) return null;
+  return '\$${_grouped(n)}';
+}
+
+/// Thousands-grouped, fixed-2-decimal formatting (no intl dependency).
+String _grouped(double v) {
+  final neg = v < 0;
+  final s = v.abs().toStringAsFixed(2);
+  final dot = s.indexOf('.');
+  final intPart = s.substring(0, dot);
+  final frac = s.substring(dot);
+  final buf = StringBuffer();
+  for (var i = 0; i < intPart.length; i++) {
+    if (i > 0 && (intPart.length - i) % 3 == 0) buf.write(',');
+    buf.write(intPart[i]);
+  }
+  return '${neg ? '-' : ''}$buf$frac';
 }
 
 /// Coerces a resolved data-model value into a clean list of doubles (drops
@@ -162,7 +204,7 @@ final CatalogItem watchlistRow = CatalogItem(
     final bookId = _str(data['bookId']);
     final title = _str(data['title']);
     final subtitle = _str(data['subtitle']);
-    final price = _str(data['price']);
+    final price = _money(_str(data['price']));
     final change = _str(data['change']);
 
     void onTap() {
@@ -302,7 +344,7 @@ final CatalogItem metricCard = CatalogItem(
     final d = ctx.data as Map;
     return _metricCell(
       label: _str(d['label']),
-      value: _str(d['value']),
+      value: _money(_str(d['value'])),
       delta: _str(d['delta']),
       hero: _str(d['variant']) == 'hero',
     );
@@ -344,7 +386,7 @@ final CatalogItem metricCluster = CatalogItem(
             Expanded(
               child: _metricCell(
                 label: _str(m['label']),
-                value: _str(m['value']),
+                value: _money(_str(m['value'])),
                 delta: _str(m['delta']),
               ),
             ),
@@ -420,11 +462,13 @@ final CatalogItem gradeTierMatrix = CatalogItem(
                 ),
                 const SizedBox(width: 12),
                 SizedBox(
-                  width: 84,
+                  width: 96,
                   child: Text(
-                    _str(g['median']),
+                    _money(_str(g['median'])),
                     style: InkEquity.price,
                     textAlign: TextAlign.right,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -514,7 +558,7 @@ final CatalogItem compsTable = CatalogItem(
                   child: Text(_str(r['meta']), style: InkEquity.subtitle),
                 ),
                 const SizedBox(width: 8),
-                Text(_str(r['price']), style: InkEquity.price),
+                Text(_money(_str(r['price'])), style: InkEquity.price),
               ],
             ),
           ),
@@ -579,23 +623,196 @@ final CatalogItem sparkline = CatalogItem(
       _boundChart(ctx, height: 24, showDot: false, strokeWidth: 1.2),
 );
 
-/// `TrendChart` — a large, axis-less price trend line with a terracotta dot on
-/// the latest point (PRD §8.3). Bind "points" to the chronological price series.
+/// `TrendChart` — a large price trend line with a right-hand price (Y) axis, a
+/// dynamic day (X) axis (1…`days` for the selected window), a faint grid, a
+/// subtle area fill, and a terracotta dot on the latest point (PRD §8.3). Bind
+/// "points" to the chronological price series; pass "days" = the window length.
 final CatalogItem trendChart = CatalogItem(
   name: 'TrendChart',
   dataSchema: S.object(
     description:
-        'A large axis-less price trend line for one comic, with a terracotta '
-        'dot on the most recent point. Bind "points" to the chronological '
-        '(oldest→newest) price series in the data model.',
-    properties: {'points': _pointsSchema()},
+        'A large price trend line with a right price axis, a bottom day axis '
+        '(1..days), and a faint grid. Bind "points" to the chronological '
+        '(oldest→newest) price series; "days" is the window length (e.g. 30).',
+    properties: {
+      'points': _pointsSchema(),
+      'days': S.number(
+        description:
+            'The window length in days, used to label the X axis 1..days '
+            '(30/60/90, or the actual span for ALL).',
+      ),
+    },
     required: ['points'],
   ),
-  widgetBuilder: (ctx) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: _boundChart(ctx, height: 132, showDot: true, strokeWidth: 1.6),
-  ),
+  widgetBuilder: (ctx) {
+    final d = ctx.data as Map;
+    final days = (_num(d['days']) ?? 0).round();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
+      child: StreamBuilder<Object?>(
+        stream: ctx.dataContext.resolve(d['points']),
+        builder: (context, snap) {
+          final points = _toDoubles(snap.data);
+          return SizedBox(
+            height: 152,
+            width: double.infinity,
+            child: points.length < 2
+                ? const SizedBox.shrink()
+                : CustomPaint(
+                    painter: _AxisChartPainter(
+                      points: points,
+                      // Fall back to point count if the agent omitted days.
+                      days: days >= 2 ? days : points.length,
+                    ),
+                  ),
+          );
+        },
+      ),
+    );
+  },
 );
+
+/// Paints [points] as a line with a right price axis, a bottom day axis
+/// (1..[days]), a faint grid, a subtle area fill, and a terracotta latest dot.
+/// Monochrome + single accent per the Ink & Equity (Tufte) doctrine.
+class _AxisChartPainter extends CustomPainter {
+  _AxisChartPainter({required this.points, required this.days});
+
+  final List<double> points;
+  final int days;
+
+  static const double _rightPad = 48; // gutter for Y (price) labels
+  static const double _bottomPad = 20; // gutter for X (day) labels
+  static const double _topPad = 8;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final plotW = size.width - _rightPad;
+    final plotH = size.height - _bottomPad - _topPad;
+    if (points.length < 2 || plotW <= 4 || plotH <= 4) return;
+
+    final dataMin = points.reduce(min);
+    final dataMax = points.reduce(max);
+    final yTicks = _niceTicks(dataMin, dataMax, 4);
+    final yMin = yTicks.first;
+    final yMax = yTicks.last;
+    final ySpan = (yMax - yMin).abs() < 1e-9 ? 1.0 : (yMax - yMin);
+
+    double yPix(double v) => _topPad + plotH - ((v - yMin) / ySpan) * plotH;
+    double xPix(int i) => (i / (points.length - 1)) * plotW;
+
+    final grid = Paint()
+      ..color = InkEquity.hairline
+      ..strokeWidth = 1;
+    const labelStyle = TextStyle(
+      color: InkEquity.graphite,
+      fontSize: 10,
+      fontFeatures: InkEquity.tabularFigures,
+    );
+
+    // Horizontal grid + right-hand price labels.
+    for (final t in yTicks) {
+      final y = yPix(t);
+      canvas.drawLine(Offset(0, y), Offset(plotW, y), grid);
+      final tp = _label(_grouped(t).replaceAll('.00', ''), labelStyle);
+      tp.paint(canvas, Offset(plotW + 6, y - tp.height / 2));
+    }
+
+    // Vertical grid + bottom day labels (1..days).
+    for (final dayTick in _xDayTicks(days)) {
+      final frac = days <= 1 ? 0.0 : (dayTick - 1) / (days - 1);
+      final x = (frac * plotW).clamp(0.0, plotW);
+      canvas.drawLine(Offset(x, _topPad), Offset(x, _topPad + plotH), grid);
+      final tp = _label('$dayTick', labelStyle);
+      tp.paint(canvas, Offset(x - tp.width / 2, _topPad + plotH + 4));
+    }
+
+    // Line path (clamped into the tick-extended range).
+    double cy(int i) => yPix(points[i].clamp(yMin, yMax));
+    final line = Path()..moveTo(xPix(0), cy(0));
+    for (var i = 1; i < points.length; i++) {
+      line.lineTo(xPix(i), cy(i));
+    }
+
+    // Subtle area fill under the line (monochrome graphite → transparent).
+    final fill = Path.from(line)
+      ..lineTo(xPix(points.length - 1), _topPad + plotH)
+      ..lineTo(xPix(0), _topPad + plotH)
+      ..close();
+    canvas.drawPath(
+      fill,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0x2E5E6266), Color(0x005E6266)], // graphite ~18%→0
+        ).createShader(Rect.fromLTWH(0, _topPad, plotW, plotH)),
+    );
+
+    canvas.drawPath(
+      line,
+      Paint()
+        ..color = InkEquity.graphite
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+
+    canvas.drawCircle(
+      Offset(xPix(points.length - 1), cy(points.length - 1)),
+      3.2,
+      Paint()..color = InkEquity.terracotta,
+    );
+  }
+
+  TextPainter _label(String text, TextStyle style) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp;
+  }
+
+  /// ~[count] "nice" round tick values spanning [lo,hi] (rounded outward).
+  List<double> _niceTicks(double lo, double hi, int count) {
+    if ((hi - lo).abs() < 1e-9) return [lo - 1, lo, lo + 1];
+    final raw = (hi - lo) / count;
+    final mag = pow(10, (log(raw) / ln10).floor()).toDouble();
+    final norm = raw / mag;
+    final step =
+        (norm < 1.5
+            ? 1
+            : norm < 3
+            ? 2
+            : norm < 7
+            ? 5
+            : 10) *
+        mag;
+    final start = (lo / step).floor() * step;
+    final end = (hi / step).ceil() * step;
+    final ticks = <double>[];
+    for (var v = start; v <= end + step / 2; v += step) {
+      ticks.add(double.parse(v.toStringAsFixed(2)));
+    }
+    return ticks;
+  }
+
+  /// ~5 day labels from 1..[days], evenly spaced and de-duplicated.
+  List<int> _xDayTicks(int days) {
+    if (days <= 1) return const [1];
+    final n = days <= 6 ? days : 5;
+    final ticks = <int>{};
+    for (var i = 0; i < n; i++) {
+      ticks.add(1 + ((days - 1) * i / (n - 1)).round());
+    }
+    return ticks.toList()..sort();
+  }
+
+  @override
+  bool shouldRepaint(_AxisChartPainter old) =>
+      old.points != points || old.days != days;
+}
 
 /// Paints a price series as an axis-less line, normalized to its own min/max.
 /// Single accent dot on the latest point (Tufte: data-ink only, one accent).
@@ -789,9 +1006,9 @@ final CatalogItem gradeVarianceRow = CatalogItem(
           ),
           const SizedBox(width: 8),
           SizedBox(
-            width: 90,
+            width: 92,
             child: Text(
-              _str(d['median']),
+              _money(_str(d['median'])),
               style: InkEquity.price,
               textAlign: TextAlign.right,
               maxLines: 1,

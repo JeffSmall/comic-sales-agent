@@ -74,9 +74,16 @@ the BasicCatalog `Button` for navigation — Button needs its child as a SEPARAT
 which the model intermittently inlines and breaks; NavLink owns its own label so that can't happen.
 
 ### `TrendChart` / `Sparkline` — price line charts  · *shipped*
-Axis-less price line; `TrendChart` is large with a terracotta dot on the latest point, `Sparkline`
-is word-sized/inline. `points` is **a data-model binding** `{"path":"/trend"}` (a literal number
-array also works). See "Data-model binding" below.
+`TrendChart` is the large detail chart: a price line with a **right-hand price (Y) axis**, a
+**dynamic bottom day (X) axis** labeled `1..days`, a faint grid, a subtle graphite area fill, and a
+terracotta dot on the latest point. Props: `points` (binding, see below) + `days` (the window length
+— `30/60/90`, or the data span for `ALL`; labels the X axis). `Sparkline` is the word-sized/inline
+variant (no axes), used in `GradeVarianceRow`. Both keep the Ink & Equity monochrome line + single
+terracotta accent (D12) — the colored fill in reference designs is intentionally not adopted.
+
+**Price formatting:** all money is normalized **in the widgets** (`_money`) to comma-grouped,
+always-2-decimal, right-justified (e.g. `$2100` / `$2,100` → `$2,100.00`; ranges reformat both
+sides). The agent's literal price strings need not be consistently formatted.
 
 ### `WindowToggle` — trend time-window selector  · *shipped*
 `{bookId: string, selected: string, options?: string[]}` (options default `30/60/90/ALL`). The

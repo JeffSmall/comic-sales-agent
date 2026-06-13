@@ -83,8 +83,9 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "{\"label\":\"Median\",\"value\":\"$<summary.median>\"}, "
         "{\"label\":\"Range\",\"value\":\"$<summary.min>–$<summary.max>\"} ].\n"
         "  (5) a Text (variant \"h5\") \"Price Trend\", then a WindowToggle "
-        "{\"bookId\":\"X\",\"selected\":\"<the SELECTED label>\"}, then a TrendChart whose "
-        "\"points\" is a DATA BINDING {\"path\":\"/trend\"} (provide the series via updateDataModel).\n"
+        "{\"bookId\":\"X\",\"selected\":\"<the SELECTED label>\"}, then a TrendChart "
+        "{\"points\":{\"path\":\"/trend\"},\"days\":<N>} where points is a DATA BINDING (provide the "
+        "series via updateDataModel) and N is the window in days (30/60/90; for ALL use 90).\n"
         "  (6) a Text (variant \"h5\") \"Sales by Grade\", then a GradeTierMatrix whose \"grades\" "
         "is ONE entry per by_grade item (highest grade first) "
         "{\"grade\":\"<grade>\",\"count\":<count>,\"median\":\"$<median>\","
@@ -109,7 +110,7 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "  • NavLink: {label, action} — a self-contained tappable link (e.g. the back affordance).\n"
         "  • MetricCard: {label, value, delta?, variant?(\"hero\"|\"metric\")} — one number.\n"
         "  • MetricCluster: {metrics:[{label,value,delta?}]} — a row of compact metrics.\n"
-        "  • TrendChart: {points:{\"path\":\"/trend\"}} — axis-less price line; points is a binding.\n"
+        "  • TrendChart: {points:{\"path\":\"/trend\"}, days:N} — price line w/ axes; points is a binding.\n"
         "  • WindowToggle: {bookId, selected} — 30/60/90/ALL time-window selector for the trend.\n"
         "  • GradeTierMatrix: {grades:[{grade,count(number),median,range?}]} — grade×volume grid.\n"
         "  • GradeVarianceRow: {grade, median, demand(\"HIGH\"|\"MED\"|\"LOW\"), points:{\"path\":…}} "
@@ -127,7 +128,7 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         '  {"id":"cluster","component":"MetricCluster","metrics":[{"label":"Last","value":"$969"},'
         '{"label":"Median","value":"$1,199"},{"label":"Range","value":"$21–$6,500"}]},\n'
         '  {"id":"window","component":"WindowToggle","bookId":"amazing-spider-man-129","selected":"90"},\n'
-        '  {"id":"trend","component":"TrendChart","points":{"path":"/trend"}},\n'
+        '  {"id":"trend","component":"TrendChart","points":{"path":"/trend"},"days":90},\n'
         '  {"id":"matrix","component":"GradeTierMatrix","grades":[{"grade":"9.6","count":4,'
         '"median":"$6,155","range":"$5,811–$6,500"},{"grade":"Raw","count":12,"median":"$95"}]},\n'
         '  {"id":"var_9_6","component":"GradeVarianceRow","grade":"9.6","median":"$6,155",'
