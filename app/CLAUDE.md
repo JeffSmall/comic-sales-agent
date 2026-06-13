@@ -96,6 +96,12 @@ also retires the old "catalogId trap". Widgets own their look (`theme/ink_equity
 binds literal-string data. Source of truth: `shared/catalog/comic_catalog_v1.md`.
 - **Use `NavLink`, not BasicCatalog `Button`, for navigation** — Button needs its child as a separate
   component by id, which the model intermittently inlines → a rendered "Invalid child" error.
+- **`NavLink` action prop must be unwrapped (`_actionName`).** The model sometimes emits the `action`
+  as a wrapped object (`{"event":{"name":"view_watchlist"}}`) instead of the bare string. A naive
+  `_str()` stringifies the whole Map into the dispatched event name, so the action→text bridge can't
+  match it and sends an EMPTY message (symptom: the back link silently does nothing; the agent
+  replies "no more outputs needed"). `_actionName()` digs the real name out of either form.
+  WatchlistRow/WindowToggle are immune — they build their action names in Dart from `bookId`.
 - **Prices are formatted in the widgets** (`_money`): comma-grouped, always 2 decimals,
   right-justified (`$2100` → `$2,100.00`; ranges reformat both sides). Don't rely on the model's
   formatting.

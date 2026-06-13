@@ -37,6 +37,29 @@ String _str(Object? v) {
   return v.toString();
 }
 
+/// Extracts an action-name string from a widget's `action` prop. The model
+/// usually emits a literal string ("view_watchlist"), but it sometimes wraps it
+/// in an event object — e.g. `{"event":{"name":"view_watchlist"}}` — in which
+/// case `_str` would stringify the whole Map ("{event: {name: view_watchlist}}")
+/// and the app's action→text bridge could never match it (the back link would
+/// silently send an empty request). Dig the real name out either way. Used by
+/// NavLink, the only widget that takes its action verbatim from a model prop
+/// (WatchlistRow/WindowToggle build theirs in Dart from bookId, so they're safe).
+String _actionName(Object? v) {
+  if (v is String) return v;
+  if (v is Map) {
+    for (final key in const ['event', 'action']) {
+      final inner = v[key];
+      if (inner is String) return inner;
+      if (inner is Map && inner['name'] is String) {
+        return inner['name'] as String;
+      }
+    }
+    if (v['name'] is String) return v['name'] as String;
+  }
+  return _str(v);
+}
+
 /// Reads an A2UI numeric prop defensively (JSON number, numeric string, or a
 /// wrapped literal). Returns null when it can't be parsed.
 double? _num(Object? v) {
@@ -284,7 +307,7 @@ final CatalogItem navLink = CatalogItem(
   ),
   widgetBuilder: (ctx) {
     final d = ctx.data as Map;
-    final action = _str(d['action']);
+    final action = _actionName(d['action']);
     return Align(
       alignment: Alignment.centerLeft,
       child: InkWell(
