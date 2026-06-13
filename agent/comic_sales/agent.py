@@ -67,28 +67,38 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "\"subtitle\":\"<grade/grader, or Raw>\" (e.g. \"CGC 9.0\" or \"Raw\"), and \"price\":"
         "\"$<last_price>\" (preformatted, e.g. \"$1,200\"). The Column's children are ONLY the "
         "WatchlistRow ids (r_<book_id>). One WatchlistRow per comic; tapping one opens its detail.\n"
-        "- DETAIL view (request \"show price history and details for book_id X\"): call "
-        "get_price_history(book_id=X), then render to comic_surface a Column \"root\" with these "
-        "children IN ORDER, using the CUSTOM WIDGETS below (bind values from the tool result; "
-        "format all money like \"$1,199\" and percents like \"+29.2%\"):\n"
+        "- DETAIL view (request \"show price history and details for book_id X\", optionally "
+        "\"... for the last N days\" or \"... for all available history\"): pick the WINDOW — "
+        "N=30/60/90 from \"for the last N days\"; \"all available history\" ⇒ 3650; otherwise the "
+        "DEFAULT is 90. Call get_price_history(book_id=X, days=<window>). The SELECTED toggle label "
+        "is \"30\"/\"60\"/\"90\" for those, or \"ALL\" for all-history, default \"90\". Then render "
+        "to comic_surface a Column \"root\" with these children IN ORDER, using the CUSTOM WIDGETS "
+        "below (bind values from the tool result; format money like \"$1,199\", percents \"+29.2%\"):\n"
         "  (1) BACK affordance FIRST — a NavLink {\"label\":\"← Watchlist\",\"action\":"
         "\"view_watchlist\"} (self-contained; do NOT use a Button here).\n"
         "  (2) a Text (variant \"h4\") with the comic title+issue.\n"
         "  (3) a MetricCard \"variant\":\"hero\": label \"Fair Market Value\", value "
         "\"$<summary.median>\", delta \"<sign><summary.change_pct>%\" (FMV ≡ median).\n"
         "  (4) a MetricCluster with metrics = [ {\"label\":\"Last\",\"value\":\"$<summary.last_price>\"}, "
-        "{\"label\":\"Median 90D\",\"value\":\"$<summary.median>\"}, "
+        "{\"label\":\"Median\",\"value\":\"$<summary.median>\"}, "
         "{\"label\":\"Range\",\"value\":\"$<summary.min>–$<summary.max>\"} ].\n"
-        "  (5) a Text (variant \"h5\") \"Price Trend (90D)\", then a TrendChart whose \"points\" is "
-        "a DATA BINDING {\"path\":\"/trend\"} (NOT a literal array). Provide the series via the "
-        "updateDataModel block described below.\n"
+        "  (5) a Text (variant \"h5\") \"Price Trend\", then a WindowToggle "
+        "{\"bookId\":\"X\",\"selected\":\"<the SELECTED label>\"}, then a TrendChart whose "
+        "\"points\" is a DATA BINDING {\"path\":\"/trend\"} (provide the series via updateDataModel).\n"
         "  (6) a Text (variant \"h5\") \"Sales by Grade\", then a GradeTierMatrix whose \"grades\" "
         "is ONE entry per by_grade item (highest grade first) "
         "{\"grade\":\"<grade>\",\"count\":<count>,\"median\":\"$<median>\","
         "\"range\":\"$<min>–$<max>\"}, and — if the tool's \"raw\" is present — a final entry "
         "{\"grade\":\"Raw\",\"count\":<raw.count>,\"median\":\"$<raw.median>\","
         "\"range\":\"$<raw.min>–$<raw.max>\"}. \"count\" is a NUMBER, not a string.\n"
-        "  (7) a Text (variant \"h5\") \"Recent Sales\", then a CompsTable whose \"rows\" is the "
+        "  (7) a Text (variant \"h5\") \"Grade Variance\", then ONE GradeVarianceRow per grade for "
+        "the UP-TO-4 grades with the MOST sales (each needs ≥3 sales; skip Raw). For each, group "
+        "that grade's sales (from sales[]) in date order: {\"grade\":\"<grade>\","
+        "\"median\":\"$<that grade's median>\",\"demand\":\"<HIGH if its last price >5% above its "
+        "first, LOW if >5% below, else MED>\",\"points\":{\"path\":\"/g_<grade with . as _>\"}} "
+        "(e.g. grade 9.6 ⇒ path \"/g_9_6\"). Provide each grade's series via its own updateDataModel "
+        "block (below). If no grade has ≥3 sales, omit this section (the title and the rows).\n"
+        "  (8) a Text (variant \"h5\") \"Recent Sales\", then a CompsTable whose \"rows\" is the "
         "~6 MOST RECENT sales (the LAST entries of the returned sales[] array, NEWEST FIRST): "
         "{\"date\":\"<short date e.g. May 12>\",\"meta\":\"<source> · <grade or 'Raw'>\","
         "\"price\":\"$<price>\"}.\n"
@@ -100,22 +110,28 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "  • MetricCard: {label, value, delta?, variant?(\"hero\"|\"metric\")} — one number.\n"
         "  • MetricCluster: {metrics:[{label,value,delta?}]} — a row of compact metrics.\n"
         "  • TrendChart: {points:{\"path\":\"/trend\"}} — axis-less price line; points is a binding.\n"
+        "  • WindowToggle: {bookId, selected} — 30/60/90/ALL time-window selector for the trend.\n"
         "  • GradeTierMatrix: {grades:[{grade,count(number),median,range?}]} — grade×volume grid.\n"
+        "  • GradeVarianceRow: {grade, median, demand(\"HIGH\"|\"MED\"|\"LOW\"), points:{\"path\":…}} "
+        "— one grade's trend + demand; points binds that grade's series.\n"
         "  • CompsTable: {rows:[{date,meta,price}]} — recent transactions.\n\n"
         "Pattern for ONE watchlist comic (ONE self-contained component; adapt ids/values per comic):\n"
         '  {"id":"r_amazing-fantasy-15","component":"WatchlistRow","bookId":"amazing-fantasy-15",'
         '"title":"Amazing Fantasy #15","subtitle":"CGC 9.0","price":"$1,200"}\n'
         "Pattern for a DETAIL (abbreviated — adapt ids/values; root.children lists every child id):\n"
-        '  {"id":"root","component":"Column","children":["back","title","fmv","cluster",'
-        '"trend_h","trend","grades_h","matrix","comps_h","comps"]},\n'
+        '  {"id":"root","component":"Column","children":["back","title","fmv","cluster","trend_h",'
+        '"window","trend","grades_h","matrix","var_h","var_9_6","comps_h","comps"]},\n'
         '  {"id":"back","component":"NavLink","label":"← Watchlist","action":"view_watchlist"},\n'
         '  {"id":"fmv","component":"MetricCard","variant":"hero","label":"Fair Market Value",'
         '"value":"$1,199","delta":"+29.2%"},\n'
         '  {"id":"cluster","component":"MetricCluster","metrics":[{"label":"Last","value":"$969"},'
-        '{"label":"Median 90D","value":"$1,199"},{"label":"Range","value":"$21–$6,500"}]},\n'
+        '{"label":"Median","value":"$1,199"},{"label":"Range","value":"$21–$6,500"}]},\n'
+        '  {"id":"window","component":"WindowToggle","bookId":"amazing-spider-man-129","selected":"90"},\n'
         '  {"id":"trend","component":"TrendChart","points":{"path":"/trend"}},\n'
         '  {"id":"matrix","component":"GradeTierMatrix","grades":[{"grade":"9.6","count":4,'
         '"median":"$6,155","range":"$5,811–$6,500"},{"grade":"Raw","count":12,"median":"$95"}]},\n'
+        '  {"id":"var_9_6","component":"GradeVarianceRow","grade":"9.6","median":"$6,155",'
+        '"demand":"HIGH","points":{"path":"/g_9_6"}},\n'
         '  {"id":"comps","component":"CompsTable","rows":[{"date":"May 12","meta":"eBay · CGC 9.4",'
         '"price":"$4,650"}]}\n\n'
         "CRITICAL: emit these A2UI JSON blocks, each in its OWN <a2ui-json>…</a2ui-json>, IN ORDER:\n"
@@ -123,13 +139,16 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         '{"version":"v0.9","createSurface":{"surfaceId":"comic_surface",'
         '"catalogId":"com.comicsales.catalog.v1"}} — never skip it; the client cannot render '
         "without it.\n"
-        "2. (DETAIL ONLY) updateDataModel carrying the trend series — every price from the tool's "
-        "sales[] array, OLDEST FIRST, as PLAIN NUMBERS (no $, no commas): "
-        '{"version":"v0.9","updateDataModel":{"surfaceId":"comic_surface","path":"/trend",'
-        '"value":[57.0,75.5,120.0, …]}}. Copy the prices EXACTLY from the tool result, in order. '
-        "Emit this BEFORE updateComponents so the TrendChart's {\"path\":\"/trend\"} binding resolves.\n"
+        "2. (DETAIL ONLY) one updateDataModel block PER bound series — emit BEFORE updateComponents "
+        "so the bindings resolve. Prices are PLAIN NUMBERS (no $, no commas), OLDEST FIRST, copied "
+        "EXACTLY from the tool result, in order:\n"
+        '   • the overall trend: {"version":"v0.9","updateDataModel":{"surfaceId":"comic_surface",'
+        '"path":"/trend","value":[57.0,75.5,120.0, …]}} (every sales[] price).\n'
+        '   • one per GradeVarianceRow grade: {"version":"v0.9","updateDataModel":{"surfaceId":'
+        '"comic_surface","path":"/g_<grade>","value":[ …that grade\'s prices, oldest first ]}} '
+        '(path matches the row\'s points.path, e.g. "/g_9_6").\n'
         "3. updateComponents with surfaceId 'comic_surface' (the component tree above).\n"
-        "The WATCHLIST view emits only blocks 1 and 3 (no trend)."
+        "The WATCHLIST view emits only blocks 1 and 3 (no data model)."
     ),
     ui_description=(
         "Dense, data-first, no decorative elements. WATCHLIST: a Column of WatchlistRow "

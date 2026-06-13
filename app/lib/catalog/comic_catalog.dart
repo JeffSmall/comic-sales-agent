@@ -654,9 +654,183 @@ class _SparkPainter extends CustomPainter {
       old.strokeWidth != strokeWidth;
 }
 
+/// `WindowToggle` — a time-window selector for the trend (30/60/90/ALL).
+/// Tapping a segment re-requests the detail for that window via the action
+/// `view_book:<bookId>:<window>` (the app bridge maps it to a `days` request).
+final CatalogItem windowToggle = CatalogItem(
+  name: 'WindowToggle',
+  dataSchema: S.object(
+    description:
+        'A row of tappable time-window segments for the price trend. The active '
+        'one is emphasized; tapping another re-requests the detail for that '
+        'window.',
+    properties: {
+      'bookId': S.string(
+        description:
+            'The comic id; the tap dispatches "view_book:<bookId>:<window>".',
+      ),
+      'selected': S.string(
+        description: 'The currently active window label, e.g. "90".',
+      ),
+      'options': S.list(
+        items: S.string(),
+        description: 'Window labels in order; defaults to 30/60/90/ALL.',
+      ),
+    },
+    required: ['bookId', 'selected'],
+  ),
+  widgetBuilder: (ctx) {
+    final d = ctx.data as Map;
+    final bookId = _str(d['bookId']);
+    final selected = _str(d['selected']);
+    final raw = d['options'];
+    final options = (raw is List && raw.isNotEmpty)
+        ? [for (final o in raw) _str(o)]
+        : const ['30', '60', '90', 'ALL'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          for (final o in options) ...[
+            _ToggleSeg(
+              label: o,
+              active: o == selected,
+              onTap: bookId.isEmpty
+                  ? null
+                  : () => ctx.dispatchEvent(
+                      UserActionEvent(
+                        name: 'view_book:$bookId:$o',
+                        sourceComponentId: ctx.id,
+                        context: const {},
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    );
+  },
+);
+
+/// One segment of [windowToggle]: charcoal + terracotta underline when active,
+/// graphite otherwise.
+class _ToggleSeg extends StatelessWidget {
+  const _ToggleSeg({required this.label, required this.active, this.onTap});
+
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: active ? InkEquity.terracotta : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? InkEquity.charcoal : InkEquity.graphite,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// `GradeVarianceRow` — per-grade trend row (PRD §8.3): grade · median price · a
+/// mini-Sparkline of that grade's price series · a HIGH/MED/LOW demand badge.
+/// Surfaces the "9.8s softening vs 9.4s strengthening" insight that the volume
+/// grid (GradeTierMatrix) can't show. `points` binds the grade's series.
+final CatalogItem gradeVarianceRow = CatalogItem(
+  name: 'GradeVarianceRow',
+  dataSchema: S.object(
+    description:
+        "One grade's price trend: grade label, median, a mini price sparkline "
+        '(bind "points" to the grade series), and a demand badge.',
+    properties: {
+      'grade': S.string(description: 'Grade label, e.g. "9.6" or "Raw".'),
+      'median': S.string(description: r'Median price, e.g. "$2,150".'),
+      'demand': S.string(
+        description: 'Demand: "HIGH" (strengthening), "MED" (flat), or "LOW".',
+        enumValues: ['HIGH', 'MED', 'LOW'],
+      ),
+      'points': _pointsSchema(),
+    },
+    required: ['grade', 'median'],
+  ),
+  widgetBuilder: (ctx) {
+    final d = ctx.data as Map;
+    final demand = _str(d['demand']).toUpperCase();
+    final demandColor = switch (demand) {
+      'HIGH' => InkEquity.up,
+      'LOW' => InkEquity.down,
+      _ => InkEquity.graphite,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(_str(d['grade']), style: InkEquity.price),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 90,
+            child: Text(
+              _str(d['median']),
+              style: InkEquity.price,
+              textAlign: TextAlign.right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _boundChart(
+              ctx,
+              height: 22,
+              showDot: false,
+              strokeWidth: 1.2,
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (demand.isNotEmpty)
+            SizedBox(
+              width: 36,
+              child: Text(
+                demand,
+                style: TextStyle(
+                  color: demandColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+                textAlign: TextAlign.right,
+              ),
+            ),
+        ],
+      ),
+    );
+  },
+);
+
 /// All custom catalog items. Slice 1: WatchlistRow. Slice 2: the Book Detail
-/// data-display widgets. Slice 3: chart widgets bound to the data model.
-/// Still planned: the interactive 30/60/90 window toggle + GradeVarianceRow.
+/// data-display widgets. Slice 3: chart widgets (data-model bound). Slice 4:
+/// WindowToggle + GradeVarianceRow.
 final List<CatalogItem> comicCatalogItems = [
   watchlistRow,
   navLink,
@@ -666,6 +840,8 @@ final List<CatalogItem> comicCatalogItems = [
   compsTable,
   sparkline,
   trendChart,
+  windowToggle,
+  gradeVarianceRow,
 ];
 
 /// The full catalog: `BasicCatalog` primitives + the custom items above, under

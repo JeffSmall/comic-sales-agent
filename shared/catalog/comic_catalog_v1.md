@@ -78,6 +78,18 @@ Axis-less price line; `TrendChart` is large with a terracotta dot on the latest 
 is word-sized/inline. `points` is **a data-model binding** `{"path":"/trend"}` (a literal number
 array also works). See "Data-model binding" below.
 
+### `WindowToggle` — trend time-window selector  · *shipped*
+`{bookId: string, selected: string, options?: string[]}` (options default `30/60/90/ALL`). The
+active segment is emphasized; tapping another dispatches `view_book:<bookId>:<window>`. The app
+bridge maps that to a detail request with a `days` window (`ALL`→all history), and the agent
+re-renders with the new window and `selected`.
+
+### `GradeVarianceRow` — per-grade trend + demand  · *shipped*
+`{grade: string, median: string, demand?: "HIGH"|"MED"|"LOW", points: <binding>}`. One row per grade
+(the top few by volume, ≥3 sales each): grade · median · a mini-`Sparkline` of that grade's series
+(bound to e.g. `/g_9_6`) · a demand badge colored up/graphite/down. Surfaces the "9.8s softening vs
+9.4s strengthening" insight the volume grid can't. Demand = sign of the grade's first→last change.
+
 ## Data-model binding (the chart-series pattern)
 
 To keep the series in one place and avoid duplicating a long array across widgets, the chart
@@ -95,14 +107,19 @@ To keep the series in one place and avoid duplicating a long array across widget
 > **71-point** series **exactly** (verified element-for-element against the tool). If a much larger
 > series ever degrades, downsample in the agent before emitting.
 
-## Planned widgets (next)
+## Step 2 complete
 
-- Interactive **30/60/90/ALL window toggle** on the trend (re-requests the detail with a `days`
-  param — needs an action like `set_window:<bookId>:<days>` + a small extension to the app's
-  action→text bridge).
-- `GradeVarianceRow` — per-grade row: grade · price · mini-`Sparkline` · HIGH/MED/LOW demand.
-- Watchlist row enrichments (inline `Sparkline` + ▲/▼ change) once `get_watchlist` computes per-book
-  change.
+All planned catalog widgets are shipped (WatchlistRow, NavLink, MetricCard, MetricCluster,
+TrendChart, Sparkline, WindowToggle, GradeTierMatrix, GradeVarianceRow, CompsTable). Remaining
+work moves to step 3 (apply full `ThemeData` + the dashboard footer ⚙ Manage / "$" Update Sales +
+Manage view) and step 4 (`refresh_sales` tool).
+
+### Minor polish / known nits
+- Watchlist row enrichments (inline `Sparkline` + ▲/▼ change) await a per-book change in
+  `get_watchlist`.
+- Grade labels occasionally render as `8` instead of `8.0` (LLM formatting variance) — cosmetic.
+- Window filtering is correct, but the current backfill data is densely recent (~all within ~30d),
+  so 30/60/90 look similar today; the interaction still drives a real `days` re-query.
 
 ## Data source
 

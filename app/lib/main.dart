@@ -206,8 +206,22 @@ class _ChatPageState extends State<ChatPage> {
     if (name == null) return null;
     if (name == 'view_watchlist') return 'show me my watchlist';
     if (name.startsWith('view_book:')) {
-      final id = name.substring('view_book:'.length);
-      return 'show price history and details for book_id $id';
+      // "view_book:<id>" or "view_book:<id>:<window>" where window is 30/60/90/ALL.
+      // bookIds use hyphens (never colons), so the first ':' splits id from window.
+      final rest = name.substring('view_book:'.length);
+      final sep = rest.indexOf(':');
+      if (sep < 0) {
+        return 'show price history and details for book_id $rest';
+      }
+      final id = rest.substring(0, sep);
+      final window = rest.substring(sep + 1);
+      if (window.toUpperCase() == 'ALL') {
+        return 'show price history and details for book_id $id '
+            'for all available history';
+      }
+      final days = int.tryParse(window) ?? 90;
+      return 'show price history and details for book_id $id '
+          'for the last $days days';
     }
     return null;
   }
