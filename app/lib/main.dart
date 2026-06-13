@@ -19,6 +19,9 @@ import 'package:genui_a2a/genui_a2a.dart';
 import 'package:genui_a2a/src/a2a/a2a.dart' as a2a;
 import 'package:logging/logging.dart';
 
+import 'catalog/comic_catalog.dart';
+import 'theme/ink_equity.dart';
+
 // The ADK `adk web` server; override with --dart-define=AGENT_URL=...
 const String _agentBaseUrl = String.fromEnvironment(
   'AGENT_URL',
@@ -45,8 +48,18 @@ class ComicSalesApp extends StatelessWidget {
     return MaterialApp(
       title: 'Comic Sales Agent',
       debugShowCheckedModeBanner: false,
+      // Minimal Ink & Equity surface colors so the custom catalog widgets render
+      // on bone. Full ThemeData + Inter font is a later step (Phase 5).
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: InkEquity.terracotta,
+          surface: InkEquity.bone,
+        ),
+        scaffoldBackgroundColor: InkEquity.bone,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: InkEquity.bone,
+          foregroundColor: InkEquity.charcoal,
+        ),
         useMaterial3: true,
       ),
       home: const ChatPage(),
@@ -80,16 +93,22 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
 
-    // 1. Surface controller backed by the BasicCatalog.
-    // The agent's createSurface catalogId is non-deterministic: it sometimes emits the
-    // SDK-default "…/v0_9/catalogs/basic/catalog.json" instead of BasicCatalog's real
-    // "…/v0_9/basic_catalog.json", which makes the surface fail with "Catalog … not found".
-    // Register the same catalog under BOTH ids so it resolves regardless of which the model uses.
-    final basicCatalog = BasicCatalogItems.asCatalog();
+    // 1. Surface controller backed by the custom comic catalog (BasicCatalog
+    // primitives + our custom data-ink widgets, e.g. WatchlistRow — see
+    // catalog/comic_catalog.dart).
+    // The agent's createSurface catalogId is non-deterministic: it may emit the
+    // canonical custom id, BasicCatalog's real id, OR the SDK-default basic id.
+    // Register the SAME (full) catalog under ALL THREE so every widget — custom
+    // and basic — resolves regardless of which id the model uses; otherwise a
+    // mismatch yields "Catalog … not found" and a blank surface.
+    final comicCatalog = buildComicCatalog(); // id: com.comicsales.catalog.v1
     _surfaceController = SurfaceController(
       catalogs: [
-        basicCatalog,
-        basicCatalog.copyWith(
+        comicCatalog,
+        comicCatalog.copyWith(
+          catalogId: 'https://a2ui.org/specification/v0_9/basic_catalog.json',
+        ),
+        comicCatalog.copyWith(
           catalogId:
               'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
         ),

@@ -38,6 +38,10 @@ dependencies:
   genui_a2a: 0.9.0
   a2a: 4.2.0
   logging: any
+  # Schema builder for custom catalog item dataSchemas (`S.object`/`S.string`).
+  # Transitive via genui; declared directly (pinned to the resolved version)
+  # since catalog/comic_catalog.dart imports it.
+  json_schema_builder: 0.1.5
 
 dev_dependencies:
   flutter_test:

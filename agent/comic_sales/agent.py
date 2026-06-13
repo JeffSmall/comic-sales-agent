@@ -59,15 +59,14 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "to add your first comic by typing its details into the box below — Comic Title, Issue "
         "Number, Grade, and Graded or Raw — followed by a concrete example line like "
         "\"e.g. Add Amazing Fantasy #15, CGC 9.0 (graded)\". Keep it friendly and brief.\n"
-        "  • NON-EMPTY watchlist: a single Column whose children are one TAPPABLE Button per comic. "
-        "Each Button: \"variant\":\"borderless\", action {\"event\":{\"name\":\"view_book:<book_id>\"}} "
-        "(REAL book_id from get_watchlist, e.g. \"view_book:amazing-fantasy-15\"), and \"child\" is "
-        "ONE Text reading \"<title> <issue> — <grade/grader, or Raw> — last $<price>\". Keep it "
-        "COMPACT: exactly one Button + one Text per comic, SHORT component ids (e.g. "
-        "\"b_<book_id>\" / \"t_<book_id>\"). The Column's children are ONLY the Button ids "
-        "(b_<book_id>); each Text (t_<book_id>) appears ONLY as its Button's \"child\", never "
-        "directly in the Column. The list has many comics and the whole render must stay small. "
-        "Tapping a comic opens its detail.\n"
+        "  • NON-EMPTY watchlist: a single Column whose children are one WatchlistRow per comic "
+        "(id \"r_<book_id>\"). Each WatchlistRow is a custom, self-contained, TAPPABLE row — do NOT "
+        "wrap it in a Button and do NOT add separate Text children. Its fields: \"bookId\":"
+        "\"<book_id>\" (the REAL id from get_watchlist, e.g. \"amazing-fantasy-15\" — it dispatches "
+        "\"view_book:<bookId>\" on tap), \"title\":\"<title> <issue>\" (e.g. \"Amazing Fantasy #15\"), "
+        "\"subtitle\":\"<grade/grader, or Raw>\" (e.g. \"CGC 9.0\" or \"Raw\"), and \"price\":"
+        "\"$<last_price>\" (preformatted, e.g. \"$1,200\"). The Column's children are ONLY the "
+        "WatchlistRow ids (r_<book_id>). One WatchlistRow per comic; tapping one opens its detail.\n"
         "- DETAIL view (request \"show price history and details for book_id X\"): call "
         "get_price_history(book_id=X), then render top-to-bottom: (1) a BACK affordance FIRST — a "
         "Button \"variant\":\"borderless\" whose child is a Text \"← Watchlist\" and whose "
@@ -77,28 +76,27 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "\"Median Graded Sales\", then ONE Text line PER GRADE formatted "
         "\"<grade>   $<median>   (range $<min>–$<max>)\" e.g. \"9.6   $2,150   (range $936–$2,495)\" "
         "— do NOT repeat the word \"Median\"; (5) one Text line for the raw bucket.\n\n"
-        "CRITICAL LAYOUT RULE — keep every render SMALL and SIMPLE so it is never truncated: build "
-        "the detail (and watchlist) from single Text components in a Column. Do NOT use Row, Card, "
-        "or nested layouts for the per-grade or summary lines — one Text per line. Books can have "
-        "~15 grades, so a compact one-Text-per-line list is required.\n\n"
-        "Pattern for ONE tappable watchlist comic (two components; adapt ids/values per comic):\n"
-        '  {"id":"b_amazing-fantasy-15","component":"Button","variant":"borderless",'
-        '"child":"t_amazing-fantasy-15","action":{"event":{"name":"view_book:amazing-fantasy-15"}}},\n'
-        '  {"id":"t_amazing-fantasy-15","component":"Text","text":"Amazing Fantasy #15 — CGC 9.0 — last $1,200"}\n\n'
+        "LAYOUT RULES: For the WATCHLIST, use one WatchlistRow per comic (above). For the DETAIL "
+        "view, keep using single Text components in a Column for now (richer custom detail widgets "
+        "are coming) — one Text per summary line and one Text per grade. Payload size is no longer "
+        "tightly capped (the app uses non-streaming message/send), but keep renders clean: prefer "
+        "the custom widget for the watchlist and avoid unnecessary nesting elsewhere.\n\n"
+        "Pattern for ONE watchlist comic (ONE self-contained component; adapt ids/values per comic):\n"
+        '  {"id":"r_amazing-fantasy-15","component":"WatchlistRow","bookId":"amazing-fantasy-15",'
+        '"title":"Amazing Fantasy #15","subtitle":"CGC 9.0","price":"$1,200"}\n\n'
         "CRITICAL: You MUST emit TWO separate A2UI JSON blocks in order:\n"
         "1. First block: a 'createSurface' message:\n"
         '   {"version":"v0.9","createSurface":{"surfaceId":"comic_surface",'
-        '"catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}}\n'
+        '"catalogId":"com.comicsales.catalog.v1"}}\n'
         "2. Second block: an 'updateComponents' message with surfaceId 'comic_surface'.\n"
         "Never skip the createSurface block — the client cannot render without it."
     ),
     ui_description=(
-        "Dense, data-first, no decorative elements. Build views from a single Column of simple "
-        "components (mostly Text); avoid Row/Card/nesting so renders stay small. WATCHLIST: a "
-        "Column of borderless Button rows, one per comic, each Button's child a single Text "
-        "(title+issue — grade — last price). DETAIL: a ← Watchlist back button first, then a "
-        "title Text, a few summary Text lines, and one Text line per grade under \"Median Graded "
-        "Sales\"."
+        "Dense, data-first, no decorative elements. WATCHLIST: a Column of WatchlistRow "
+        "components, one per comic (bookId, title, subtitle=grade/Raw, price). DETAIL: a "
+        "← Watchlist back button first, then a title Text, a few summary Text lines, and one "
+        "Text line per grade under \"Median Graded Sales\". The agent BINDS DATA into the custom "
+        "WatchlistRow; the widget owns its look."
     ),
     include_schema=True,
     include_examples=False,
