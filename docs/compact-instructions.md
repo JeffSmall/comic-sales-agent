@@ -174,10 +174,64 @@ user reads from and writes to conversationally through the existing chat UI.
 
 ---
 
-## Phase 3 — Live market data (IN PROGRESS — Spike C COMPLETE)
+## Phase 3 — Live market data + custom catalog + app shell (IN PROGRESS — POC VALIDATED)
 
-**Status:** 785 real eBay sales across all 12 watchlist books in Firestore (424 graded / 361 raw).
-`get_price_history` tool built and verified. Interactive GenUI E1 (tap drill-in) shipped.
+**Status:** 785 real eBay sales across all 12 watchlist books in Firestore (424 graded / 361 raw);
+`get_price_history` built and verified; the full **custom A2UI catalog (10 widgets)** ships; the app
+shell is themed to **Ink & Equity** with a bundled **Inter** font, a tap-only dashboard footer, and
+a Manage view. **The proof of concept is validated end-to-end on the iOS simulator: an ADK/Gemini
+agent emits A2UI, the Flutter app renders it as native, on-brand, data-dense UI, and tap-driven
+drill-in navigation works.** Only the `refresh_sales` "$" wiring (step 4) remains in Phase 3.
+
+### Phase 3 build sequence (steps 1–3 DONE; step 4 next)
+
+1. **Transport — lifted the ~9 KB SSE limit.** `a2a 4.2.0` truncates a single `message/stream` SSE
+   event at ~9 KB, which blanked rich screens. Migrated to non-streaming `message/send`
+   (`_sendNonStreaming` in `app/lib/main.dart`): a plain HTTP POST returning the whole `Task` in one
+   body, no per-event cap (verified 27 KB intact). The "keep renders to single Text lines"
+   constraint is **lifted**. A2A model types imported via `package:genui_a2a/src/a2a/a2a.dart`
+   (top level only exports `A2AClient`/`AgentCard`; one `// ignore: implementation_imports`).
+
+2. **Custom A2UI catalog** (`app/lib/catalog/comic_catalog.dart`, tokens in
+   `app/lib/theme/ink_equity.dart`, contract in `shared/catalog/comic_catalog_v1.md`). Ten
+   data-ink-first widgets under id `com.comicsales.catalog.v1`: WatchlistRow, NavLink, MetricCard,
+   MetricCluster, TrendChart (right Y-axis, dynamic 1..days X-axis, faint grid, area fill, terracotta
+   latest dot), Sparkline, WindowToggle (30/60/90/ALL), GradeTierMatrix, GradeVarianceRow (per-grade
+   sparkline + HIGH/MED/LOW demand), CompsTable. **Contract: the agent BINDS DATA (literal props);
+   the widget OWNS THE LOOK.** Challenges solved here:
+   - **Chart series via data-model binding.** The agent emits `updateDataModel` (`{path:"/trend"}`)
+     before `updateComponents`; the widget resolves the `{path}` ref in a reactive `StreamBuilder`.
+   - **Tolerant JSON parse.** gemini-2.5-flash intermittently drops a trailing `}`/`]` (~1/3 of
+     renders); the parser balances brackets (ignoring braces inside strings) and retries once.
+   - **Synthetic `createSurface` guard.** The model sometimes omits `createSurface` → the controller
+     buffers `updateComponents` forever (blank). The app synthesizes one if it's missing.
+   - **`NavLink` replaces BasicCatalog `Button`** for navigation — Button needs its child as a
+     separate component by id, which the model intermittently inlines → a rendered "Invalid child".
+   - **Three catalogIds registered.** The model non-deterministically emits one of three ids; the
+     full catalog is registered under all three so any id resolves.
+   - **Prices formatted in-widget** (`_money`): comma-grouped, always-2-decimal, right-justified.
+
+3. **App shell + theme** (`InkEquity.theme()` in `app/lib/theme/ink_equity.dart`; shell in
+   `app/lib/main.dart`). Full Ink & Equity Material 3 `ThemeData` + bundled **Inter** variable font
+   (`app/fonts/Inter-VariableFont.ttf`, declared in `pubspec.yaml`; `fontWeight`→wght axis; tabular
+   figures via `FontFeature`). App-side `_View {watchlist, detail, manage}` state layered over the
+   single `comic_surface` drives the chrome (the agent doesn't know the screen): tap-only dashboard
+   **footer** (⚙ Manage / "$" Update Sales), **no dashboard text input** (D13); free text only in
+   **Manage** (gear → back arrow + "Manage Watchlist" + input bar) and the **first-run welcome**
+   (empty watchlist detected via the absence of `WatchlistRow`). The **12-book limit** is enforced in
+   the agent prompt. Challenges solved here:
+   - **Theme font flows into self-styling widgets** because Flutter's `Text` merges explicit styles
+     over the ambient `DefaultTextStyle`; chart axis labels (drawn via `TextPainter`, which bypasses
+     `DefaultTextStyle`) set `fontFamily` explicitly.
+   - **NavLink wrapped-action bug (this session).** The model sometimes emits a NavLink's `action`
+     prop as a nested object (`{"event":{"name":"view_watchlist"}}`) instead of the bare string;
+     `_str()` stringified the whole Map into the dispatched event name, so the action→text bridge
+     couldn't match it and sent an EMPTY message — the "← Watchlist" back link silently did nothing.
+     Fixed with `_actionName()` (unwraps either form). WatchlistRow/WindowToggle were immune (they
+     build action names in Dart from `bookId`; only NavLink takes its name verbatim from a prop).
+
+> **Note:** the Ink & Equity `ThemeData` was originally slated for Phase 5 but was pulled forward
+> into Phase 3 step 3 (it was cheap once the custom catalog existed, and it made the POC demo-ready).
 
 **eBay scraper (`agent/tools/backfill_sales.py`):**
 
@@ -206,34 +260,42 @@ python tools/backfill_sales.py --classify --incremental --commit
 **`--incremental`:** scrapes since `(newest stored sale_date − 2d)`. Idempotent. A full 12-book
 incremental sweep is still ~3 hrs wall-clock (pacing).
 
-**Planned — app-triggered refresh:** `refresh_sales` ADK tool launches scraper as detached
-`caffeinate -i`-wrapped background process and returns immediately. Non-blocking required.
+**Planned — step 4, app-triggered refresh:** `refresh_sales` ADK tool launches the scraper as a
+detached `caffeinate -i`-wrapped background process and returns immediately (non-blocking required),
+wired to the "$" Update Sales footer icon (which currently shows a placeholder SnackBar). Local-only
+/ residential IP. This is the one remaining Phase 3 item.
 
-**Interactive GenUI E1:** watchlist and book details are tappable. BasicCatalog `Button`
-(borderless) = tap primitive; single surface `comic_surface`; action args encoded in action name;
-app bridges action back to a text request. Read `agent/CLAUDE.md` and `app/CLAUDE.md` before
-touching the agent prompt or render path.
+**Interactive GenUI (tap drill-in):** watchlist rows and book details are tappable. **`NavLink` and
+the custom widgets are the tap primitives** (NOT BasicCatalog `Button`); single surface
+`comic_surface` (re-render REPLACES → drill-in, no growing stack); action args encoded in the action
+NAME (e.g. `view_book:<id>`, `view_book:<id>:<window>`, `view_watchlist`); the app's action→text
+bridge maps the name to an equivalent text request. Read `agent/CLAUDE.md` and `app/CLAUDE.md`
+before touching the agent prompt or render path — they hold the hard-won gotchas above.
 
 ---
 
 ## Phase 4 — Production (deferred)
 
-Cloud Run deploy, Firebase Auth, push notifications for price alerts, custom A2UI catalog.
+Cloud Run deploy, Firebase Auth, push notifications for price alerts. (The custom A2UI catalog,
+once listed here, is DONE — built in Phase 3 step 2.)
 
-**v1/v2 scope boundary:** everything above is v1 (single user, local agent, BasicCatalog).
-v2 = push notifications + background cloud polling. Do NOT scaffold v2 constructs
+**v1/v2 scope boundary:** everything above is v1 (single user, local agent, custom catalog on top of
+BasicCatalog). v2 = push notifications + background cloud polling. Do NOT scaffold v2 constructs
 (userId path layers, FCM tokens, cloud scraper) until Phase 4 is explicitly started.
 
 ---
 
-## Phase 5 — Design & styling (deferred — do after features work)
+## Phase 5 — Design & styling (largely pulled forward into Phase 3 step 3)
 
 Design system: "Ink & Equity" — bone `#F9F7F2`, charcoal `#1A1B1C`, graphite `#5E6266`,
 terracotta `#BD472A`; Inter with tabular+lining figures; 0px corners. Decisions locked D1–D13
-in `docs/DESIGN_BACKLOG.md`. Apply as Flutter `ThemeData` in Phase 5.
+in `docs/DESIGN_BACKLOG.md`. The `ThemeData` + bundled Inter font are **DONE** (`InkEquity.theme()`,
+Phase 3 step 3). The widgets self-style with the tokens via the catalog contract (agent prescribes,
+app renders) — never hardcoded ad-hoc in the Flutter app.
 
-Styling is always delivered via the catalog contract (agent prescribes, app renders) — never
-hardcoded ad-hoc in the Flutter app.
+**Still open under Phase 5:** dark-mode tokens; app icon / launch screen identity; watchlist-row
+inline sparkline + ▲/▼ change; sort/filter chips; guided "add a comic" capture; `SmallMultiplesGrid`;
+filling out `docs/tufte-infographics.md` (still a stub). See `docs/DESIGN_BACKLOG.md` / PRD §14.
 
 ---
 

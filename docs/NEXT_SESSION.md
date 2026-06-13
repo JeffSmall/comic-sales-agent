@@ -3,6 +3,12 @@
 > **How to use:** start a new session and say `read docs/NEXT_SESSION.md`. This file is
 > self-bootstrapping — it points you at the rest. Overwrite it as the work moves on.
 
+> **✅ Proof of concept VALIDATED (2026-06-13).** The whole thesis works end-to-end on the iOS
+> simulator: the ADK/Gemini agent emits A2UI, the Flutter app renders it as native, on-brand,
+> data-dense UI, and tap-driven drill-in navigation (watchlist → book detail → back) works, as does
+> conversational add/edit/remove over real eBay data. The concept is solid. What remains is polish +
+> productionization, not de-risking.
+
 We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, the **custom A2UI
 catalog is BUILT** (the watchlist + the rich Book Detail render to the Ink & Equity design), the SSE
 transport limit is lifted, and **the app shell is themed (step 3 DONE)** — full Ink & Equity
@@ -28,8 +34,15 @@ tool wired to the "$" Update Sales icon** (non-blocking, local-only). First read
   watchlist row to drill in; the window toggle re-queries by `days`.
 - **Chart series via A2UI data-model binding** (`updateDataModel` → `{path}` ref); prices normalized
   in-widget (`_money`) to comma-grouped, always-2-decimal, right-justified.
-- **Robustness:** synthetic-`createSurface` guard (no permanent blank when the model skips it) +
-  `NavLink` replacing the fragile BasicCatalog `Button`.
+- **App shell (step 3):** full `ThemeData` via `InkEquity.theme()` + bundled **Inter**
+  (`app/fonts/Inter-VariableFont.ttf`); app-side `_View {watchlist, detail, manage}` drives the
+  chrome — tap-only dashboard footer (⚙ Manage / "$" Update Sales), input bar only in Manage + the
+  first-run welcome; **12-book limit** in the agent prompt. The "$" icon is a placeholder SnackBar
+  until step 4.
+- **Robustness:** synthetic-`createSurface` guard (no permanent blank when the model skips it);
+  tolerant bracket-balancing JSON parse (model drops trailing closers ~1/3 of the time); `NavLink`
+  replacing the fragile BasicCatalog `Button`; and `_actionName()` unwrapping the model's
+  occasional wrapped NavLink `action` (`{"event":{"name":…}}`) that had silently broken the back link.
 
 ## Design is locked — build to this (PRD + DESIGN_BACKLOG D1–D13)
 
