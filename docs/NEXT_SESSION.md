@@ -16,7 +16,14 @@ transport limit is lifted, and **the app shell is themed (step 3 DONE)** — ful
 **Manage** view, and the 12-book limit. The next body of work is **step 4 — the `refresh_sales` ADK
 tool wired to the "$" Update Sales icon** (non-blocking, local-only). First read `CLAUDE.md`,
 `app/CLAUDE.md`, `agent/CLAUDE.md`, `shared/catalog/comic_catalog_v1.md`, `docs/PRD.md`,
-`docs/DESIGN_BACKLOG.md`.
+`docs/DESIGN_BACKLOG.md`, `docs/PERFORMANCE.md`.
+
+> **⚠️ Known issue — tap→render latency (~12 s/detail tap).** Diagnosed and measured 2026-06-13;
+> full breakdown in `docs/PERFORMANCE.md`. It is **not** the app/network/Firestore — it's the
+> render Gemini call, which is OUTPUT-token-bound (~240 tok/s) and hand-emits ~2,600 tokens incl.
+> the literal price arrays. Top fixes: stop sending the price series through the LLM; skip the LLM
+> for deterministic taps (row / window toggle); restore streaming/progressive feedback. See the
+> Performance roadmap item below.
 
 ## What's working now (all on `main`)
 
@@ -79,6 +86,19 @@ Hard-won gotchas live in the CLAUDE.md files — don't rediscover them:
    `caffeinate -i`-wrapped detached process, local-only / residential IP). The footer "$" button
    currently shows a "not wired up yet" SnackBar (`_onUpdateSales` in `main.dart`) — replace that
    with a real `_dispatch` once the tool exists. `docs/tufte-infographics.md` is still a stub.
+5. **Performance — cut tap→render latency (~12 s/detail tap today).** Full diagnosis + measured
+   data in `docs/PERFORMANCE.md`. The latency is the render Gemini call (82–90 % of a tap),
+   OUTPUT-token-bound. Work the levers in priority order:
+   - **(a)** Stop sending the price arrays through the LLM — populate the chart data model
+     (`/trend`, `/g_*`) from the tool/app directly so the render emits only structural JSON
+     (~halves detail latency; the binding plumbing already exists).
+   - **(b)** Skip the LLM for **deterministic** taps (`view_book:<id>`, window toggle) — render from
+     a Dart/template path off the tool result; reserve the model for natural-language turns
+     (~12 s → ~0.2 s warm). Biggest win, biggest change (moves render authority agent→app for those
+     paths).
+   - **(c)** Restore streaming / progressive feedback (non-streaming `message/send` blocks the whole
+     turn → dead spinner). Must not reintroduce the ~9 KB SSE truncation (`app/CLAUDE.md` → Transport).
+   - **(d)** Minor: trim the system prompt; warm Firestore on launch; watch `contextId` history growth.
 
 > **Minor catalog polish deferred** (`shared/catalog/comic_catalog_v1.md` "known nits"): watchlist-row
 > inline sparkline + ▲/▼ change (needs per-book change in `get_watchlist`); grades occasionally

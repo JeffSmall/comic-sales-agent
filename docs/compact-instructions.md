@@ -233,6 +233,15 @@ drill-in navigation works.** Only the `refresh_sales` "$" wiring (step 4) remain
 > **Note:** the Ink & Equity `ThemeData` was originally slated for Phase 5 but was pulled forward
 > into Phase 3 step 3 (it was cheap once the custom catalog existed, and it made the POC demo-ready).
 
+### Phase 3 — known issue: tap→render latency (profiled 2026-06-13)
+
+A book-detail tap takes **~12 s** locally. Profiled with ADK before/after callbacks + token counts:
+**82–90 % is the render Gemini call (model #2), which is OUTPUT-token-bound (~240 tok/s)** and
+hand-emits ~2,600 tokens incl. the literal price arrays. Not the app/network/Firestore (<1 s
+combined). Top levers: (a) stop sending price series through the LLM; (b) skip the LLM for
+deterministic taps; (c) restore streaming/progressive feedback. Full data + reasoning:
+**`docs/PERFORMANCE.md`**; roadmapped as step 5 in `docs/NEXT_SESSION.md`.
+
 **eBay scraper (`agent/tools/backfill_sales.py`):**
 
 - Uses `curl_cffi` impersonating Chrome TLS/HTTP2 fingerprint + session warm (fetch `ebay.com`
@@ -314,8 +323,12 @@ filling out `docs/tufte-infographics.md` (still a stub). See `docs/DESIGN_BACKLO
 | `agent/pyproject.toml` | Python deps via uv; `[backfill]` extra for scraper |
 | `app/lib/main.dart` | Full Flutter app — GenUI wiring, fallback A2UI parser, chat UI |
 | `app/pubspec.yaml` | Flutter deps — genui 0.9.2, genui_a2a 0.9.0, a2a 4.2.0, logging |
-| `shared/catalog/` | A2UI widget catalog contract (currently empty — custom catalog TBD) |
+| `app/lib/catalog/comic_catalog.dart` | The 10 custom A2UI widgets (`buildComicCatalog()`) |
+| `app/lib/theme/ink_equity.dart` | Ink & Equity tokens + `InkEquity.theme()` app-shell ThemeData |
+| `app/fonts/Inter-VariableFont.ttf` | Bundled Inter (variable, all weights) — declared in pubspec.yaml |
+| `shared/catalog/comic_catalog_v1.md` | The custom A2UI widget contract (BUILT — source of truth for the 10 widgets) |
 | `docs/CPCD.md` | Domain model & data contract — source of truth for all data shapes |
 | `docs/DESIGN_BACKLOG.md` | Living UX/design backlog + locked decisions D1–D13 |
 | `docs/PRD.md` | Product requirements + user flows |
+| `docs/PERFORMANCE.md` | tap→render latency diagnosis + measured data (2026-06-13) + fix levers |
 | `docs/tufte-infographics.md` | Tufte visual design doctrine (stub — fill out in Phase 5) |

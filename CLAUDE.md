@@ -31,6 +31,7 @@ comic-sales-agent/
 │  ├─ NEXT_SESSION.md     # session bootstrap — read this first each session
 │  ├─ DESIGN_BACKLOG.md   # living UX/design backlog + locked decisions D1–D13
 │  ├─ PRD.md              # product requirements + user flows
+│  ├─ PERFORMANCE.md      # tap→render latency diagnosis + measured data + fix levers
 │  ├─ tufte-infographics.md  # Tufte visual design doctrine
 │  └─ compact-instructions.md  # full phase history for /compact
 ├─ agent/                 # Python ADK agent — see agent/CLAUDE.md
