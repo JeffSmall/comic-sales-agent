@@ -24,6 +24,11 @@ abstract final class InkEquity {
   static const Color up = Color(0xFF2D7A4D); // price increase (muted green)
   static const Color down = Color(0xFFC9302C); // price decrease (muted red)
 
+  /// Recessed off-bone surface (~6% darker than [bone]) for chrome that should
+  /// read as anchored/set apart from the bone content area — e.g. the dashboard
+  /// footer offset from the watchlist.
+  static const Color boneMuted = Color(0xFFECE8DF);
+
   /// Bundled typeface (D12). Single variable font, all weights; see `pubspec.yaml`.
   static const String fontFamily = 'Inter';
 

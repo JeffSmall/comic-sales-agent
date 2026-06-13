@@ -596,29 +596,35 @@ class _DashboardFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 52,
-        child: Row(
-          children: [
-            Expanded(
-              child: _FooterButton(
-                icon: Icons.settings_outlined,
-                label: 'Manage',
-                alignment: Alignment.centerLeft,
-                onTap: onManage,
+    // Slightly darker than the bone content area so the footer reads as
+    // set-apart chrome. ColoredBox wraps the SafeArea so the bottom inset
+    // (home-indicator strip) is tinted too.
+    return ColoredBox(
+      color: InkEquity.boneMuted,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 52,
+          child: Row(
+            children: [
+              Expanded(
+                child: _FooterButton(
+                  icon: Icons.settings_outlined,
+                  label: 'Manage',
+                  alignment: Alignment.centerLeft,
+                  onTap: onManage,
+                ),
               ),
-            ),
-            Expanded(
-              child: _FooterButton(
-                icon: Icons.attach_money,
-                label: 'Update Sales',
-                alignment: Alignment.centerRight,
-                onTap: onUpdateSales,
+              Expanded(
+                child: _FooterButton(
+                  icon: Icons.attach_money,
+                  label: 'Update Sales',
+                  alignment: Alignment.centerRight,
+                  onTap: onUpdateSales,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
