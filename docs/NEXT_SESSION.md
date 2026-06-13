@@ -44,23 +44,31 @@ Hard-won gotchas (documented — don't rediscover):
   `main.dart`), which returns the whole `Task` payload in one HTTP body with no cap. Rich screens
   are unblocked; the lean single-`Text` constraint is lifted. See `app/CLAUDE.md` → "Transport".
 
-## Next actions — implementation sequence (steps 1, 1.5 & 2 of the old plan are DONE)
+## Next actions — implementation sequence (steps 1, 1.5 & 2 are DONE)
 
 1. ✅ **DONE — Lifted the ~9 KB SSE size limit.** The app was migrated off streaming
    `message/stream` to non-streaming **`message/send`** in `app/lib/main.dart` (`_sendNonStreaming`,
    built on a dedicated `a2a.A2AClient`; A2UI text is read from `task.artifacts[].parts`).
-   Verified end-to-end: watchlist auto-load + tap drill-in both render; a 27 KB detail response
-   arrives intact. The lean single-`Text` constraint is gone — build rich screens freely.
-2. **Build the custom A2UI catalog** (the big work — first time beyond `BasicCatalog`; custom Flutter
-   widgets registered with GenUI, per CPCD §6). Suggested order, smallest-risk first:
-   **WatchlistRow → MetricCard → Sparkline → GradeTierMatrix → trend line chart → Grade-Variance row
-   → comps table.** Build to `docs/PRD.md` §8 + the Ink & Equity tokens. Keep the catalog contract:
-   agent binds data, widgets own the look.
-3. **Apply the tokens + screen model:** Flutter `ThemeData` from Ink & Equity; wire the dashboard
-   footer (⚙ Manage + "$" Update Sales), the Manage view, FMV=median hero, 12-book limit.
+   Verified end-to-end; a 27 KB detail response arrives intact. The lean single-`Text` constraint is gone.
+2. ✅ **DONE — Built the custom A2UI catalog** (`app/lib/catalog/comic_catalog.dart`, tokens in
+   `app/lib/theme/ink_equity.dart`, contract in `shared/catalog/comic_catalog_v1.md`). Shipped:
+   **WatchlistRow, NavLink, MetricCard, MetricCluster, TrendChart, Sparkline, WindowToggle,
+   GradeTierMatrix, GradeVarianceRow, CompsTable.** The watchlist renders as custom rows; Book
+   Detail is the rich market view (FMV hero → cluster → Price Trend + 30/60/90/ALL toggle →
+   GradeTierMatrix → Grade Variance → Recent Sales). Chart series use **A2UI data-model binding**
+   (`updateDataModel` → `{path}` ref) — verified exact for a 71-pt series. Robustness fixes landed:
+   synthetic-`createSurface` guard + `NavLink` replacing the fragile BasicCatalog `Button`. All
+   verified on the simulator. Commits `7d69c95`, `5df8579`, `74a9401`, `5e43a31`.
+3. **← NEXT: Apply the tokens + screen model.** Full Flutter `ThemeData` from Ink & Equity (bundle
+   Inter); wire the dashboard footer (⚙ Manage + "$" Update Sales), the Manage view, the 12-book
+   limit. (FMV=median hero is already done in the detail.) The custom widgets already self-style with
+   the tokens; this step is the app shell (app bar, footer, input bar, Manage screen) + the font.
 4. **Still-open non-UX Phase 3:** the `refresh_sales` ADK tool wired to the "$" Update Sales icon
-   (non-blocking, `caffeinate`-wrapped, local-only). `docs/tufte-infographics.md` is still a stub;
-   `shared/catalog/` is still empty (the catalog contract should land there).
+   (non-blocking, `caffeinate`-wrapped, local-only). `docs/tufte-infographics.md` is still a stub.
+
+> Minor catalog polish deferred (see `shared/catalog/comic_catalog_v1.md` "known nits"): watchlist
+> row inline sparkline + ▲/▼ change (needs per-book change in `get_watchlist`); grades sometimes
+> render `8` vs `8.0`.
 
 > Remaining open *design* questions (PRD §14): guided-add vs conversation in Manage; grade-at-a-glance
 > on the row; sparse/empty grades; the Manage view's shape; dark-mode tokens. Resolve as they come up.
