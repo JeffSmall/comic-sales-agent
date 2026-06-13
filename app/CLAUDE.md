@@ -208,10 +208,20 @@ agent-side conventions. The app changes (all in `main.dart`) and why they exist:
   first. Re-creating an existing surface is a no-op/replace — exactly what every normal turn does.
 
 - **Custom catalog (`catalog/comic_catalog.dart`).** The app registers `buildComicCatalog()`
-  (BasicCatalog + custom widgets: WatchlistRow, MetricCard, MetricCluster, GradeTierMatrix,
-  CompsTable) under the custom id `com.comicsales.catalog.v1` AND both BasicCatalog ids, so any
-  catalogId the model emits resolves the full set. Widgets own their look (Ink & Equity tokens in
-  `theme/ink_equity.dart`); the agent binds literal-string data. Contract: `shared/catalog/comic_catalog_v1.md`.
+  (BasicCatalog + custom widgets: WatchlistRow, NavLink, MetricCard, MetricCluster, GradeTierMatrix,
+  CompsTable, Sparkline, TrendChart) under the custom id `com.comicsales.catalog.v1` AND both
+  BasicCatalog ids, so any catalogId the model emits resolves the full set. Widgets own their look
+  (Ink & Equity tokens in `theme/ink_equity.dart`); the agent binds literal-string data. Contract:
+  `shared/catalog/comic_catalog_v1.md`. Use `NavLink` (not BasicCatalog `Button`) for nav — Button's
+  separate-child-by-id requirement is a recurring "Invalid child" failure when the model inlines it.
+
+- **Data-model binding for chart series.** Chart widgets (`TrendChart`/`Sparkline`) bind their
+  `points` to the surface data model rather than taking a literal array: the agent emits an
+  `updateDataModel` block (`{path:"/trend", value:[…]}`) before `updateComponents`, and the widget
+  resolves `ctx.dataContext.resolve(data['points'])` (a `{path}` ref) in a reactive `StreamBuilder`.
+  `updateDataModel` flows through the same `_injectA2uiFromBuffer` path (A2uiMessage.fromJson handles
+  it). NOTE: the LLM still transcribes the array into `updateDataModel.value` — binding is about
+  clean data/view separation, not avoiding transcription (measured exact for a 71-point series).
 
 - **Drill-in scroll = scroll to TOP, not bottom (`_scrollToTop`).** With single-surface drill-in,
   each new view (watchlist, or a detail whose "← Watchlist" back button + header are at the top)

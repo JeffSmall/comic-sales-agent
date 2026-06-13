@@ -71,21 +71,24 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "get_price_history(book_id=X), then render to comic_surface a Column \"root\" with these "
         "children IN ORDER, using the CUSTOM WIDGETS below (bind values from the tool result; "
         "format all money like \"$1,199\" and percents like \"+29.2%\"):\n"
-        "  (1) BACK affordance FIRST — a Button \"variant\":\"borderless\" whose child is a Text "
-        "\"← Watchlist\", action {\"event\":{\"name\":\"view_watchlist\"}}.\n"
+        "  (1) BACK affordance FIRST — a NavLink {\"label\":\"← Watchlist\",\"action\":"
+        "\"view_watchlist\"} (self-contained; do NOT use a Button here).\n"
         "  (2) a Text (variant \"h4\") with the comic title+issue.\n"
         "  (3) a MetricCard \"variant\":\"hero\": label \"Fair Market Value\", value "
         "\"$<summary.median>\", delta \"<sign><summary.change_pct>%\" (FMV ≡ median).\n"
         "  (4) a MetricCluster with metrics = [ {\"label\":\"Last\",\"value\":\"$<summary.last_price>\"}, "
         "{\"label\":\"Median 90D\",\"value\":\"$<summary.median>\"}, "
         "{\"label\":\"Range\",\"value\":\"$<summary.min>–$<summary.max>\"} ].\n"
-        "  (5) a Text (variant \"h5\") \"Sales by Grade\", then a GradeTierMatrix whose \"grades\" "
+        "  (5) a Text (variant \"h5\") \"Price Trend (90D)\", then a TrendChart whose \"points\" is "
+        "a DATA BINDING {\"path\":\"/trend\"} (NOT a literal array). Provide the series via the "
+        "updateDataModel block described below.\n"
+        "  (6) a Text (variant \"h5\") \"Sales by Grade\", then a GradeTierMatrix whose \"grades\" "
         "is ONE entry per by_grade item (highest grade first) "
         "{\"grade\":\"<grade>\",\"count\":<count>,\"median\":\"$<median>\","
         "\"range\":\"$<min>–$<max>\"}, and — if the tool's \"raw\" is present — a final entry "
         "{\"grade\":\"Raw\",\"count\":<raw.count>,\"median\":\"$<raw.median>\","
         "\"range\":\"$<raw.min>–$<raw.max>\"}. \"count\" is a NUMBER, not a string.\n"
-        "  (6) a Text (variant \"h5\") \"Recent Sales\", then a CompsTable whose \"rows\" is the "
+        "  (7) a Text (variant \"h5\") \"Recent Sales\", then a CompsTable whose \"rows\" is the "
         "~6 MOST RECENT sales (the LAST entries of the returned sales[] array, NEWEST FIRST): "
         "{\"date\":\"<short date e.g. May 12>\",\"meta\":\"<source> · <grade or 'Raw'>\","
         "\"price\":\"$<price>\"}.\n"
@@ -93,8 +96,10 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "CUSTOM WIDGETS (this catalog adds these to the basic Text/Column/Button/Row; emit them "
         "as components with the fields shown — the app styles them):\n"
         "  • WatchlistRow: {bookId, title, subtitle?, price, change?} — a tappable watchlist row.\n"
+        "  • NavLink: {label, action} — a self-contained tappable link (e.g. the back affordance).\n"
         "  • MetricCard: {label, value, delta?, variant?(\"hero\"|\"metric\")} — one number.\n"
         "  • MetricCluster: {metrics:[{label,value,delta?}]} — a row of compact metrics.\n"
+        "  • TrendChart: {points:{\"path\":\"/trend\"}} — axis-less price line; points is a binding.\n"
         "  • GradeTierMatrix: {grades:[{grade,count(number),median,range?}]} — grade×volume grid.\n"
         "  • CompsTable: {rows:[{date,meta,price}]} — recent transactions.\n\n"
         "Pattern for ONE watchlist comic (ONE self-contained component; adapt ids/values per comic):\n"
@@ -102,21 +107,29 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         '"title":"Amazing Fantasy #15","subtitle":"CGC 9.0","price":"$1,200"}\n'
         "Pattern for a DETAIL (abbreviated — adapt ids/values; root.children lists every child id):\n"
         '  {"id":"root","component":"Column","children":["back","title","fmv","cluster",'
-        '"grades_h","matrix","comps_h","comps"]},\n'
+        '"trend_h","trend","grades_h","matrix","comps_h","comps"]},\n'
+        '  {"id":"back","component":"NavLink","label":"← Watchlist","action":"view_watchlist"},\n'
         '  {"id":"fmv","component":"MetricCard","variant":"hero","label":"Fair Market Value",'
         '"value":"$1,199","delta":"+29.2%"},\n'
         '  {"id":"cluster","component":"MetricCluster","metrics":[{"label":"Last","value":"$969"},'
         '{"label":"Median 90D","value":"$1,199"},{"label":"Range","value":"$21–$6,500"}]},\n'
+        '  {"id":"trend","component":"TrendChart","points":{"path":"/trend"}},\n'
         '  {"id":"matrix","component":"GradeTierMatrix","grades":[{"grade":"9.6","count":4,'
         '"median":"$6,155","range":"$5,811–$6,500"},{"grade":"Raw","count":12,"median":"$95"}]},\n'
         '  {"id":"comps","component":"CompsTable","rows":[{"date":"May 12","meta":"eBay · CGC 9.4",'
         '"price":"$4,650"}]}\n\n'
-        "CRITICAL: You MUST emit TWO separate A2UI JSON blocks in order:\n"
-        "1. First block: a 'createSurface' message:\n"
-        '   {"version":"v0.9","createSurface":{"surfaceId":"comic_surface",'
-        '"catalogId":"com.comicsales.catalog.v1"}}\n'
-        "2. Second block: an 'updateComponents' message with surfaceId 'comic_surface'.\n"
-        "Never skip the createSurface block — the client cannot render without it."
+        "CRITICAL: emit these A2UI JSON blocks, each in its OWN <a2ui-json>…</a2ui-json>, IN ORDER:\n"
+        "1. createSurface: "
+        '{"version":"v0.9","createSurface":{"surfaceId":"comic_surface",'
+        '"catalogId":"com.comicsales.catalog.v1"}} — never skip it; the client cannot render '
+        "without it.\n"
+        "2. (DETAIL ONLY) updateDataModel carrying the trend series — every price from the tool's "
+        "sales[] array, OLDEST FIRST, as PLAIN NUMBERS (no $, no commas): "
+        '{"version":"v0.9","updateDataModel":{"surfaceId":"comic_surface","path":"/trend",'
+        '"value":[57.0,75.5,120.0, …]}}. Copy the prices EXACTLY from the tool result, in order. '
+        "Emit this BEFORE updateComponents so the TrendChart's {\"path\":\"/trend\"} binding resolves.\n"
+        "3. updateComponents with surfaceId 'comic_surface' (the component tree above).\n"
+        "The WATCHLIST view emits only blocks 1 and 3 (no trend)."
     ),
     ui_description=(
         "Dense, data-first, no decorative elements. WATCHLIST: a Column of WatchlistRow "

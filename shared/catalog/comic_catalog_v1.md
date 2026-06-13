@@ -68,17 +68,40 @@ density bar (length + intensity ∝ `count`), the count, and the median (right, 
 `rows`: a list (newest first, ~6–8) of `{date: string, meta: string, price: string}` where `meta`
 is `source · grade` (e.g. `eBay · CGC 9.4`). Bind the most recent `get_price_history.sales[]`.
 
+### `NavLink` — self-contained tappable link  · *shipped*
+`{label: string, action: string}`. Dispatches `action` on tap (e.g. `view_watchlist`). Replaces
+the BasicCatalog `Button` for navigation — Button needs its child as a SEPARATE component by id,
+which the model intermittently inlines and breaks; NavLink owns its own label so that can't happen.
+
+### `TrendChart` / `Sparkline` — price line charts  · *shipped*
+Axis-less price line; `TrendChart` is large with a terracotta dot on the latest point, `Sparkline`
+is word-sized/inline. `points` is **a data-model binding** `{"path":"/trend"}` (a literal number
+array also works). See "Data-model binding" below.
+
+## Data-model binding (the chart-series pattern)
+
+To keep the series in one place and avoid duplicating a long array across widgets, the chart
+`points` is bound, not inlined:
+
+1. The agent emits an `updateDataModel` block **before** `updateComponents`:
+   `{"version":"v0.9","updateDataModel":{"surfaceId":"comic_surface","path":"/trend","value":[57.0, …]}}`
+   — every `sales[].price`, oldest first, as plain numbers.
+2. The `TrendChart` component references it: `{"points":{"path":"/trend"}}`.
+3. The widget resolves the path via `ctx.dataContext.resolve(points)` (reactive `StreamBuilder`).
+
+> **Honest note on fidelity:** the agent (LLM) still writes the array into `updateDataModel.value` —
+> binding relocates *where* the array lives (clean data/view separation, reactive, no duplication),
+> it does **not** remove LLM transcription. Empirically, gemini-2.5-flash (thinking off) reproduced a
+> **71-point** series **exactly** (verified element-for-element against the tool). If a much larger
+> series ever degrades, downsample in the agent before emitting.
+
 ## Planned widgets (next)
 
-- `Sparkline` / `TrendChart` — word-sized + large axis-less line charts with a terracotta
-  latest-point dot, binding the chronological `sales[]` price series. **Open problem:** a 50–100
-  point series is unreliable for the LLM to transcribe verbatim — solve via downsampling or A2UI
-  data-model binding (`updateDataModel`) rather than literal props.
 - Interactive **30/60/90/ALL window toggle** on the trend (re-requests the detail with a `days`
   param — needs an action like `set_window:<bookId>:<days>` + a small extension to the app's
   action→text bridge).
-- `GradeVarianceRow` — per-grade row: grade · price · mini-sparkline · HIGH/MED/LOW demand.
-- Watchlist row enrichments (inline sparkline + ▲/▼ change) once `get_watchlist` computes per-book
+- `GradeVarianceRow` — per-grade row: grade · price · mini-`Sparkline` · HIGH/MED/LOW demand.
+- Watchlist row enrichments (inline `Sparkline` + ▲/▼ change) once `get_watchlist` computes per-book
   change.
 
 ## Data source

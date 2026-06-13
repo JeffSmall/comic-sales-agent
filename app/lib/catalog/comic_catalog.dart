@@ -11,6 +11,8 @@
 /// copy) with the custom items below, under the id [comicCatalogId].
 library;
 
+import 'dart:math' show max, min;
+
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
@@ -55,6 +57,19 @@ List<Map<String, Object?>> _maps(Object? v) {
     ];
   }
   return const [];
+}
+
+/// Coerces a resolved data-model value into a clean list of doubles (drops
+/// anything unparseable). Used by the chart widgets after resolving their
+/// `points` binding.
+List<double> _toDoubles(Object? v) {
+  if (v is! List) return const [];
+  final out = <double>[];
+  for (final e in v) {
+    final n = _num(e);
+    if (n != null) out.add(n);
+  }
+  return out;
 }
 
 /// A compact metric cell (label + value + optional signed delta), shared by
@@ -199,6 +214,57 @@ final CatalogItem watchlistRow = CatalogItem(
               ],
             ),
           ],
+        ),
+      ),
+    );
+  },
+);
+
+/// `NavLink` — a self-contained tappable navigation link (e.g. the "← Watchlist"
+/// back affordance). Dispatches its `action` name on tap. Replaces the
+/// BasicCatalog `Button` for navigation: Button needs its child as a SEPARATE
+/// component referenced by id, which the model intermittently inlines and breaks;
+/// NavLink owns its own label so that failure mode can't happen.
+final CatalogItem navLink = CatalogItem(
+  name: 'NavLink',
+  dataSchema: S.object(
+    description:
+        'A tappable inline navigation link (e.g. a back affordance). Dispatches '
+        'its action name on tap. Self-contained — no child component needed.',
+    properties: {
+      'label': S.string(description: 'The link text, e.g. "← Watchlist".'),
+      'action': S.string(
+        description:
+            'The action name dispatched on tap, e.g. "view_watchlist".',
+      ),
+    },
+    required: ['label', 'action'],
+  ),
+  widgetBuilder: (ctx) {
+    final d = ctx.data as Map;
+    final action = _str(d['action']);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: InkWell(
+        onTap: action.isEmpty
+            ? null
+            : () => ctx.dispatchEvent(
+                UserActionEvent(
+                  name: action,
+                  sourceComponentId: ctx.id,
+                  context: const {},
+                ),
+              ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            _str(d['label']),
+            style: const TextStyle(
+              color: InkEquity.terracotta,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
       ),
     );
@@ -457,15 +523,149 @@ final CatalogItem compsTable = CatalogItem(
   },
 );
 
+/// Schema for a chart's `points`: either a literal number array OR a
+/// `{"path": "..."}` binding into the surface data model. We bind (the agent
+/// emits the series via `updateDataModel`, the widget reads it by reference)
+/// so the series lives in one place and the view stays declarative.
+Schema _pointsSchema() => S.combined(
+  description:
+      'The price series, oldest→newest. Prefer a {"path":"…"} binding into the '
+      'data model (set via updateDataModel); a literal number array also works.',
+  oneOf: [
+    S.list(items: S.number(), description: 'Literal price array.'),
+    A2uiSchemas.dataBindingSchema(description: 'Path to a price array.'),
+  ],
+);
+
+/// Resolves a chart's `points` prop (literal or `{path}` binding) and paints it.
+/// Reactive: re-renders if the bound data-model value changes.
+Widget _boundChart(
+  CatalogItemContext ctx, {
+  required double height,
+  required bool showDot,
+  required double strokeWidth,
+}) {
+  return StreamBuilder<Object?>(
+    stream: ctx.dataContext.resolve((ctx.data as Map)['points']),
+    builder: (context, snap) {
+      final points = _toDoubles(snap.data);
+      return SizedBox(
+        height: height,
+        width: double.infinity,
+        child: points.length < 2
+            ? const SizedBox.shrink()
+            : CustomPaint(
+                painter: _SparkPainter(
+                  points: points,
+                  showDot: showDot,
+                  strokeWidth: strokeWidth,
+                ),
+              ),
+      );
+    },
+  );
+}
+
+/// `Sparkline` — a word-sized inline trend line (no axis, data-ink only).
+final CatalogItem sparkline = CatalogItem(
+  name: 'Sparkline',
+  isImplicitlyFlexible: true,
+  dataSchema: S.object(
+    description: 'A compact inline trend line. Bind "points" to a price array.',
+    properties: {'points': _pointsSchema()},
+    required: ['points'],
+  ),
+  widgetBuilder: (ctx) =>
+      _boundChart(ctx, height: 24, showDot: false, strokeWidth: 1.2),
+);
+
+/// `TrendChart` — a large, axis-less price trend line with a terracotta dot on
+/// the latest point (PRD §8.3). Bind "points" to the chronological price series.
+final CatalogItem trendChart = CatalogItem(
+  name: 'TrendChart',
+  dataSchema: S.object(
+    description:
+        'A large axis-less price trend line for one comic, with a terracotta '
+        'dot on the most recent point. Bind "points" to the chronological '
+        '(oldest→newest) price series in the data model.',
+    properties: {'points': _pointsSchema()},
+    required: ['points'],
+  ),
+  widgetBuilder: (ctx) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: _boundChart(ctx, height: 132, showDot: true, strokeWidth: 1.6),
+  ),
+);
+
+/// Paints a price series as an axis-less line, normalized to its own min/max.
+/// Single accent dot on the latest point (Tufte: data-ink only, one accent).
+class _SparkPainter extends CustomPainter {
+  _SparkPainter({
+    required this.points,
+    required this.showDot,
+    required this.strokeWidth,
+  });
+
+  final List<double> points;
+  final bool showDot;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final minV = points.reduce(min);
+    final maxV = points.reduce(max);
+    final span = (maxV - minV).abs() < 1e-9 ? 1.0 : (maxV - minV);
+    final dx = size.width / (points.length - 1);
+
+    Offset at(int i) {
+      final x = dx * i;
+      final y = size.height - ((points[i] - minV) / span) * size.height;
+      return Offset(x, y.clamp(0.0, size.height));
+    }
+
+    final path = Path()..moveTo(at(0).dx, at(0).dy);
+    for (var i = 1; i < points.length; i++) {
+      final p = at(i);
+      path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = InkEquity.graphite
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+
+    if (showDot) {
+      canvas.drawCircle(
+        at(points.length - 1),
+        3.2,
+        Paint()..color = InkEquity.terracotta,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SparkPainter old) =>
+      old.points != points ||
+      old.showDot != showDot ||
+      old.strokeWidth != strokeWidth;
+}
+
 /// All custom catalog items. Slice 1: WatchlistRow. Slice 2: the Book Detail
-/// data-display widgets. Still planned: Sparkline / TrendChart (numeric series)
-/// + the interactive 30/60/90 window toggle + GradeVarianceRow.
+/// data-display widgets. Slice 3: chart widgets bound to the data model.
+/// Still planned: the interactive 30/60/90 window toggle + GradeVarianceRow.
 final List<CatalogItem> comicCatalogItems = [
   watchlistRow,
+  navLink,
   metricCard,
   metricCluster,
   gradeTierMatrix,
   compsTable,
+  sparkline,
+  trendChart,
 ];
 
 /// The full catalog: `BasicCatalog` primitives + the custom items above, under
