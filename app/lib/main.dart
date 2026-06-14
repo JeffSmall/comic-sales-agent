@@ -68,7 +68,7 @@ class ChatPage extends StatefulWidget {
 /// PRD screen model (D7–D13): the dashboard is tap-only (footer = ⚙ Manage / "$"
 /// Update Sales, no text field); free-text entry lives in Manage and on the
 /// first-run welcome screen only.
-enum _View { watchlist, detail, manage }
+enum _View { watchlist, detail, manage, refresh }
 
 class _ChatPageState extends State<ChatPage> {
   late final a2a.A2AClient _a2aClient;
@@ -180,16 +180,16 @@ class _ChatPageState extends State<ChatPage> {
   // watchlist so the footer view reflects the current list.
   void _exitManage() => _loadWatchlist();
 
-  // The "$" footer icon — Update Sales. Wiring it to the non-blocking
-  // `refresh_sales` ADK tool is the next Phase 3 task (NEXT_SESSION step 4); for
-  // now the affordance exists but reports that it isn't live yet.
+  // The "$" footer icon — Update Sales. Dispatches a refresh request; the agent
+  // calls the non-blocking `refresh_sales` tool (which launches the local eBay
+  // scraper detached and returns at once) and renders a "Updating Sales" status
+  // card to comic_surface with a "← Watchlist" back link. We set _View.refresh
+  // first so the chrome stays the tap-only footer (the status card has no
+  // WatchlistRow, which would otherwise trip the empty-watchlist → input-bar
+  // detection that only runs while _view == watchlist).
   void _onUpdateSales() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Updating sales isn’t wired up yet — coming next.'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    _setView(_View.refresh);
+    _dispatch('update my sales');
   }
 
   // Drill-in navigation re-renders the single "comic_surface" in place, so each new view

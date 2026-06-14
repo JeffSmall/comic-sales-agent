@@ -12,7 +12,14 @@ from a2ui.schema.manager import A2uiSchemaManager
 from a2ui.schema.constants import VERSION_0_9_1
 from a2ui.basic_catalog.provider import BasicCatalog
 
-from .tools import add_sale, get_price_history, get_watchlist, remove_comic, upsert_comic
+from .tools import (
+    add_sale,
+    get_price_history,
+    get_watchlist,
+    refresh_sales,
+    remove_comic,
+    upsert_comic,
+)
 
 # ---------------------------------------------------------------------------
 # A2UI system prompt
@@ -49,6 +56,12 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "price, value, or trend, AND for the DETAIL view below. Resolve book_id via get_watchlist "
         "first. Pass grade (e.g. 9.8) to focus on one grade, or 0 for all sales. Render only the "
         "returned sales/summary — never invent prices.\n"
+        "- refresh_sales(): call this when the user asks to update, refresh, or fetch the latest "
+        "sales / market data / prices for their watchlist (e.g. \"update sales\", \"refresh "
+        "prices\"). It launches a background eBay refresh and returns IMMEDIATELY — it does NOT "
+        "wait for the data. Take NO arguments. Do NOT call get_watchlist or get_price_history "
+        "afterward (the new sales arrive in the background over the next while). Just render the "
+        "REFRESH view below from its returned message.\n"
         "After any mutation, call get_watchlist again and re-render.\n"
         "If a tool returns {\"status\": \"error\", ...}, do NOT stay silent: render one Card whose "
         "Text briefly explains, in plain language, that the request could not be completed.\n\n"
@@ -107,7 +120,16 @@ _system_prompt = _schema_mgr.generate_system_prompt(
         "~6 MOST RECENT sales (the LAST entries of the returned sales[] array, NEWEST FIRST): "
         "{\"date\":\"<short date e.g. May 12>\",\"meta\":\"<source> · <grade or 'Raw'>\","
         "\"price\":\"$<price>\"}.\n"
-        "Copy numbers from the tool result EXACTLY — never invent or round sales you weren't given.\n\n"
+        "Copy numbers from the tool result EXACTLY — never invent or round sales you weren't given.\n"
+        "- REFRESH view (request \"update my sales\" / \"refresh prices\"): call refresh_sales(), "
+        "then render to comic_surface a Column \"root\" with these children IN ORDER: (1) a NavLink "
+        "{\"label\":\"← Watchlist\",\"action\":\"view_watchlist\"}; (2) a Text (variant \"h4\") "
+        "\"Updating Sales\"; (3) ONE MetricCard or — simpler — a Column of Text lines presenting the "
+        "tool's returned \"message\" verbatim (it's user-facing copy). On {\"status\":\"started\"} or "
+        "{\"status\":\"already_running\"} this is a normal informational view (NOT an error). On "
+        "{\"status\":\"error\"} render the back NavLink + a Text explaining the \"error\" in plain "
+        "language. The refresh view emits only blocks 1 and 3 (createSurface + updateComponents; no "
+        "data model).\n\n"
         "CUSTOM WIDGETS (this catalog adds these to the basic Text/Column/Button/Row; emit them "
         "as components with the fields shown — the app styles them):\n"
         "  • WatchlistRow: {bookId, title, subtitle?, price, change?} — a tappable watchlist row.\n"
@@ -181,7 +203,7 @@ root_agent = Agent(
     model="gemini-2.5-flash",
     description="Comic book sales tracking agent — emits A2UI catalog payloads.",
     instruction=instruction,
-    tools=[get_watchlist, upsert_comic, remove_comic, add_sale, get_price_history],
+    tools=[get_watchlist, upsert_comic, remove_comic, add_sale, get_price_history, refresh_sales],
     # gemini-2.5-flash's thinking mode intermittently returns an EMPTY completion
     # (0 output tokens, finish=STOP) on the function-calling + large-A2UI-schema path,
     # which makes the agent silently render nothing (~25% of the time). Disabling

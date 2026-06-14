@@ -53,6 +53,11 @@ A raised exception aborts the A2A turn silently — the app then shows nothing.
 - `add_sale(book_id, price, ...)` — appends a user-entered sale.
 - `get_price_history(book_id, days=90, grade=0)` — summary, per-grade breakdown, chronological
   sales; the basis for the detail view + charts.
+- `refresh_sales()` — launches the eBay scraper (`tools/backfill_sales.py --incremental --classify
+  --commit`) as a DETACHED `caffeinate -i` background process and returns IMMEDIATELY (a full sweep
+  is ~3 hrs, far longer than an A2A turn can block). Wired to the app's "$" Update Sales icon.
+  Local-only (residential IP). A PID-file lock (`comic_sales/.refresh/refresh.pid`) blocks a 2nd
+  concurrent sweep. See "refresh_sales" below.
 
 ## Critical implementation details
 - **Callable instruction (DO NOT make it a plain string).** `instruction=instruction` where
@@ -115,5 +120,20 @@ Firestore), start ONE agent, don't hammer it with parallel requests.
 python tools/backfill_sales.py --classify --book new-mutants-98 --max-pages 1 [--commit]
 python tools/backfill_sales.py --classify --incremental --commit          # routine refresh
 ```
-- **Planned `refresh_sales` ADK tool** (remaining Phase 3): non-blocking, `caffeinate -i`-wrapped
-  detached process wired to the app's "$" Update Sales icon (local-only, residential IP).
+## refresh_sales (`comic_sales/tools/refresh.py`) — app-triggered background refresh  🚧 built, pending on-sim verification
+The "$" Update Sales icon dispatches "update my sales" → the agent calls `refresh_sales()`, which
+launches `tools/backfill_sales.py --incremental --classify --commit --max-pages 1` as a DETACHED
+(`start_new_session=True`) `caffeinate -i`-wrapped subprocess and returns at once. Local-only
+(residential IP — see Backfill). Hard-won details:
+- **PID-file lock** (`comic_sales/.refresh/refresh.pid`, gitignored under `.refresh/`) → a 2nd tap
+  while a sweep runs returns `{"status":"already_running"}` instead of launching a 2nd scraper (two
+  scrapers from one IP trip Imperva). Per-run logs at `comic_sales/.refresh/refresh-<ts>.log`.
+- **Zombie reaping (CRITICAL).** The detached child is a direct child of the agent process; when it
+  exits it lingers as a ZOMBIE that still answers `os.kill(pid, 0)`, so the lock would never release
+  within one agent lifetime. `_running_pid()` reaps it first with `os.waitpid(pid, os.WNOHANG)`
+  (falls back to the signal probe if it isn't our child, e.g. after an agent restart).
+- Pre-flight guards return `{"status":"error"}`: missing scraper file, missing `curl_cffi`
+  (`uv sync --extra backfill`), immediate-crash (poll after a 0.3 s grace window).
+- System prompt: a tool entry (takes NO args, returns immediately, do NOT re-query after) + a
+  **REFRESH view** rendered to `comic_surface` — ← Watchlist NavLink + "Updating Sales" header + the
+  tool's `message` verbatim; `started`/`already_running` are informational, `error` is explained.

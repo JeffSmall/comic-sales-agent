@@ -61,14 +61,15 @@ comic-sales-agent/
 > **Proof of concept: VALIDATED.** The core thesis — an ADK/Gemini agent emits A2UI and the Flutter
 > app renders it as native, on-brand, data-dense UI with tap-driven drill-in navigation — works
 > end-to-end on the iOS simulator (watchlist → book detail → back; conversational add/edit/remove;
-> real eBay data; Ink & Equity theme + Inter font). Phase 3 is feature-complete except the
-> `refresh_sales` "$" wiring (step 4). Full narrative + challenges: `docs/compact-instructions.md`.
+> real eBay data; Ink & Equity theme + Inter font). The `refresh_sales` "$" wiring (step 4) is now
+> **built** and unit-verified — only on-simulator verification of that one path remains. Full
+> narrative + challenges: `docs/compact-instructions.md`.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
 | Phase 1 | Local proof of concept (agent emits A2UI, Flutter renders it) | ✅ COMPLETE |
 | Phase 2 | Persistent watchlist (Firestore read/write, conversational CRUD) | ✅ COMPLETE |
-| Phase 3 | Live market data + custom A2UI catalog (10 widgets) + app shell (Ink & Equity theme, Inter, footer, Manage) | 🚧 IN PROGRESS — only `refresh_sales` left |
+| Phase 3 | Live market data + custom A2UI catalog (10 widgets) + app shell (Ink & Equity theme, Inter, footer, Manage) + `refresh_sales` | 🚧 IN PROGRESS — `refresh_sales` built, pending on-simulator verification |
 | Phase 4 | Production (Cloud Run, Firebase Auth, push notifications) | 🔜 Deferred |
 | Phase 5 | Design polish (dark mode, app identity, sort chips, guided add) — theme/font already done in P3 | 🔜 Mostly deferred |
 

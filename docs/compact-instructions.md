@@ -181,9 +181,10 @@ user reads from and writes to conversationally through the existing chat UI.
 shell is themed to **Ink & Equity** with a bundled **Inter** font, a tap-only dashboard footer, and
 a Manage view. **The proof of concept is validated end-to-end on the iOS simulator: an ADK/Gemini
 agent emits A2UI, the Flutter app renders it as native, on-brand, data-dense UI, and tap-driven
-drill-in navigation works.** Only the `refresh_sales` "$" wiring (step 4) remains in Phase 3.
+drill-in navigation works.** The `refresh_sales` "$" wiring (step 4) is now **built** and
+unit-verified — only on-simulator verification of that one path remains in Phase 3.
 
-### Phase 3 build sequence (steps 1–3 DONE; step 4 next)
+### Phase 3 build sequence (steps 1–4 BUILT; step 4 pending on-sim verification)
 
 1. **Transport — lifted the ~9 KB SSE limit.** `a2a 4.2.0` truncates a single `message/stream` SSE
    event at ~9 KB, which blanked rich screens. Migrated to non-streaming `message/send`
@@ -269,10 +270,21 @@ python tools/backfill_sales.py --classify --incremental --commit
 **`--incremental`:** scrapes since `(newest stored sale_date − 2d)`. Idempotent. A full 12-book
 incremental sweep is still ~3 hrs wall-clock (pacing).
 
-**Planned — step 4, app-triggered refresh:** `refresh_sales` ADK tool launches the scraper as a
-detached `caffeinate -i`-wrapped background process and returns immediately (non-blocking required),
-wired to the "$" Update Sales footer icon (which currently shows a placeholder SnackBar). Local-only
-/ residential IP. This is the one remaining Phase 3 item.
+**Step 4, app-triggered refresh — BUILT (pending on-simulator verification):** `refresh_sales`
+(`agent/comic_sales/tools/refresh.py`) launches the scraper (`backfill_sales.py --incremental
+--classify --commit --max-pages 1`) as a detached `caffeinate -i`-wrapped background process and
+returns immediately, wired to the "$" Update Sales footer icon (`_onUpdateSales` →
+`_setView(_View.refresh); _dispatch('update my sales')`). Local-only / residential IP. Challenges
+solved: a **PID-file lock** (`comic_sales/.refresh/refresh.pid`, gitignored) blocks a 2nd concurrent
+sweep (two scrapers from one IP trip Imperva); **zombie-reaping** in `_running_pid()` via
+`os.waitpid(WNOHANG)` releases the lock when the detached child exits (a zombie still answers
+`os.kill(pid,0)`, so the lock would otherwise never release within one agent lifetime); pre-flight
+guards for missing scraper / missing `curl_cffi` / immediate-crash. System prompt adds a tool entry
+(no args, returns immediately) + a **REFRESH view** (← Watchlist NavLink + "Updating Sales" header +
+the tool's `message`). New app `_View.refresh` keeps the tap-only footer and stops the no-WatchlistRow
+status card from tripping the empty-watchlist → input-bar detection. Verified: lock branches, detached
+launch + caffeinate + log capture, zombie reap, `flutter analyze` clean. **Not yet run agent+app on
+the simulator** (that starts a real ~3 hr eBay sweep) — the one remaining Phase 3 task.
 
 **Interactive GenUI (tap drill-in):** watchlist rows and book details are tappable. **`NavLink` and
 the custom widgets are the tap primitives** (NOT BasicCatalog `Button`); single surface
@@ -316,6 +328,7 @@ filling out `docs/tufte-infographics.md` (still a stub). See `docs/DESIGN_BACKLO
 | `agent/comic_sales/firestore_client.py` | Lazy Firestore singleton (ADC, reads `FIRESTORE_PROJECT`) |
 | `agent/comic_sales/tools/watchlist.py` | `get_watchlist`, `upsert_comic`, `remove_comic`, `add_sale` |
 | `agent/comic_sales/tools/price_history.py` | `get_price_history(book_id, days, grade?)` — summary, per-grade breakdown, sales series |
+| `agent/comic_sales/tools/refresh.py` | `refresh_sales()` — launches the eBay scraper detached (`caffeinate -i`), PID-file lock + zombie reap; wired to the "$" Update Sales icon |
 | `agent/tools/seed_watchlist.py` | One-time idempotent Firestore seed/migration |
 | `agent/tools/backfill_sales.py` | eBay sold-listings scraper → Firestore `sales` |
 | `agent/comic_sales/agent.json` | A2A agent card — required by `adk api_server --a2a` |

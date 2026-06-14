@@ -11,12 +11,21 @@
 
 We're in the comic-sales-agent monorepo. **Phase 3 data + price tools are done**, the **custom A2UI
 catalog is BUILT** (the watchlist + the rich Book Detail render to the Ink & Equity design), the SSE
-transport limit is lifted, and **the app shell is themed (step 3 DONE)** — full Ink & Equity
-`ThemeData`, bundled **Inter** font, dashboard **footer** (⚙ Manage / "$" Update Sales), the
-**Manage** view, and the 12-book limit. The next body of work is **step 4 — the `refresh_sales` ADK
-tool wired to the "$" Update Sales icon** (non-blocking, local-only). First read `CLAUDE.md`,
-`app/CLAUDE.md`, `agent/CLAUDE.md`, `shared/catalog/comic_catalog_v1.md`, `docs/PRD.md`,
-`docs/DESIGN_BACKLOG.md`, `docs/PERFORMANCE.md`.
+transport limit is lifted, **the app shell is themed (step 3 DONE)** — full Ink & Equity `ThemeData`,
+bundled **Inter** font, dashboard **footer** (⚙ Manage / "$" Update Sales), the **Manage** view, and
+the 12-book limit — and **step 4 (`refresh_sales`) is BUILT** (non-blocking, local-only; wired to the
+"$" icon) but **not yet verified on the simulator**.
+
+> **← FIRST THING TO DO:** verify `refresh_sales` end-to-end on the simulator. Launch the agent + app,
+> tap the "$" Update Sales footer icon, and confirm the agent calls `refresh_sales`, renders the
+> "Updating Sales" card (with a ← Watchlist back link), and the detached eBay scraper actually starts
+> (check `agent/comic_sales/.refresh/refresh-<ts>.log`). **This kicks off a real ~3 hr incremental
+> eBay sweep across all 12 books** (residential IP, paced ~15 min/book) — kill the scraper after
+> confirming it launched if you don't want the full sweep. Once verified, flip step 4 to ✅ here and
+> in the other docs, then move to **step 5 (Performance)** below.
+
+First read `CLAUDE.md`, `app/CLAUDE.md`, `agent/CLAUDE.md`, `shared/catalog/comic_catalog_v1.md`,
+`docs/PRD.md`, `docs/DESIGN_BACKLOG.md`, `docs/PERFORMANCE.md`.
 
 > **⚠️ Known issue — tap→render latency (~12 s/detail tap).** Diagnosed and measured 2026-06-13;
 > full breakdown in `docs/PERFORMANCE.md`. It is **not** the app/network/Firestore — it's the
@@ -44,8 +53,8 @@ tool wired to the "$" Update Sales icon** (non-blocking, local-only). First read
 - **App shell (step 3):** full `ThemeData` via `InkEquity.theme()` + bundled **Inter**
   (`app/fonts/Inter-VariableFont.ttf`); app-side `_View {watchlist, detail, manage}` drives the
   chrome — tap-only dashboard footer (⚙ Manage / "$" Update Sales), input bar only in Manage + the
-  first-run welcome; **12-book limit** in the agent prompt. The "$" icon is a placeholder SnackBar
-  until step 4.
+  first-run welcome; **12-book limit** in the agent prompt. The "$" icon now dispatches "update my
+  sales" → the agent's `refresh_sales` tool (step 4, built; pending on-simulator verification).
 - **Robustness:** synthetic-`createSurface` guard (no permanent blank when the model skips it);
   tolerant bracket-balancing JSON parse (model drops trailing closers ~1/3 of the time); `NavLink`
   replacing the fragile BasicCatalog `Button`; and `_actionName()` unwrapping the model's
@@ -82,11 +91,26 @@ Hard-won gotchas live in the CLAUDE.md files — don't rediscover them:
    + input bar); free-text only in Manage + the first-run welcome (empty-watchlist detection via the
    absence of `WatchlistRow` in the response). **12-book limit** enforced in the agent prompt
    (`agent.py`: refuse the 13th add, render an explanatory Card). Verified on the simulator.
-4. **← NEXT: `refresh_sales` ADK tool wired to the "$" Update Sales icon** (non-blocking,
-   `caffeinate -i`-wrapped detached process, local-only / residential IP). The footer "$" button
-   currently shows a "not wired up yet" SnackBar (`_onUpdateSales` in `main.dart`) — replace that
-   with a real `_dispatch` once the tool exists. `docs/tufte-infographics.md` is still a stub.
-5. **Performance — cut tap→render latency (~12 s/detail tap today).** Full diagnosis + measured
+4. 🚧 **BUILT, pending on-simulator verification — `refresh_sales` ADK tool wired to the "$" Update
+   Sales icon** (non-blocking, `caffeinate -i`-wrapped detached process, local-only / residential IP).
+   - Tool: `agent/comic_sales/tools/refresh.py` → `refresh_sales()` launches
+     `tools/backfill_sales.py --incremental --classify --commit --max-pages 1` detached, returns at
+     once. **PID-file lock** (`comic_sales/.refresh/refresh.pid`, gitignored) blocks a 2nd concurrent
+     sweep; **zombie-reaping** in `_running_pid()` (via `os.waitpid(WNOHANG)`) releases the lock when
+     the child exits (a zombie still answers `os.kill(pid,0)`). Pre-flight guards: missing scraper,
+     missing `curl_cffi`, immediate-crash. Per-run logs at `comic_sales/.refresh/refresh-<ts>.log`.
+   - Registered in `agent.py` `tools=[…]` + `tools/__init__.py`. System prompt adds the tool entry
+     (no args, returns immediately, don't re-query) + a **REFRESH view** (← Watchlist NavLink +
+     "Updating Sales" header + the tool's `message`; `started`/`already_running` informational,
+     `error` explained).
+   - App (`main.dart`): `_onUpdateSales` → `_setView(_View.refresh); _dispatch('update my sales')`
+     (replaced the placeholder SnackBar). New `_View.refresh` keeps the tap-only footer and stops the
+     no-`WatchlistRow` status card from tripping the empty-watchlist → input-bar detection.
+   - **Verified:** lock branches, detached launch + `caffeinate` wrap + log capture, zombie reap
+     releasing the lock, `flutter analyze` clean. **NOT yet run agent+app on the simulator** (that
+     starts a real eBay sweep — see the FIRST THING TO DO note at the top). `docs/tufte-infographics.md`
+     is still a stub.
+5. **← NEXT (after verifying step 4): Performance — cut tap→render latency (~12 s/detail tap today).** Full diagnosis + measured
    data in `docs/PERFORMANCE.md`. The latency is the render Gemini call (82–90 % of a tap),
    OUTPUT-token-bound. Work the levers in priority order:
    - **(a)** Stop sending the price arrays through the LLM — populate the chart data model

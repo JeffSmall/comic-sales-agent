@@ -18,17 +18,21 @@ app/fonts/Inter-VariableFont.ttf  # bundled Inter (variable, all weights); decla
 `InkEquity.theme()` is the full Material 3 theme (bone surface, charcoal/graphite text, terracotta
 accent, Inter via `fontFamily`, tuned `textTheme` for the `h4`→titleLarge / `h5`→titleMedium slots
 the agent uses, 2px input border). Inter is bundled (one variable font; `fontWeight`→wght axis).
-- **App-side nav state `_View {watchlist, detail, manage}`** layered over the single `comic_surface`
-  decides the chrome — the agent doesn't know which screen we're on. Set in the action bridge
-  (`view_watchlist`→watchlist, `view_book:*`→detail) and on gear tap (→manage).
+- **App-side nav state `_View {watchlist, detail, manage, refresh}`** layered over the single
+  `comic_surface` decides the chrome — the agent doesn't know which screen we're on. Set in the
+  action bridge (`view_watchlist`→watchlist, `view_book:*`→detail), on gear tap (→manage), and on the
+  "$" tap (→refresh). `refresh` exists so the status card (no `WatchlistRow`) doesn't trip the
+  empty-watchlist → input-bar detection (which only runs while `_view == watchlist`).
 - **Bottom bar is conditional:** the tap-only **dashboard footer** (`_DashboardFooter`: ⚙ Manage /
   "$" Update Sales) shows while browsing (watchlist/detail); the **text-input bar** shows only in
   **Manage** (gear) and the **first-run welcome** (empty watchlist) — D13 keeps free text off the
   dashboard. Manage adds an app-bar back arrow + "Manage Watchlist" title; exiting reloads the list.
 - **Welcome/empty detection:** a watchlist response with no `"WatchlistRow"` ⇒ the agent rendered the
   welcome view ⇒ show the input bar (`_watchlistEmpty`, set in `_injectA2uiFromBuffer`).
-- **"$" Update Sales** is a placeholder SnackBar today (`_onUpdateSales`); wire it to the
-  `refresh_sales` tool next (NEXT_SESSION step 4). The **12-book limit** lives in the agent prompt.
+- **"$" Update Sales** (`_onUpdateSales`) sets `_View.refresh` and `_dispatch('update my sales')` →
+  the agent calls the non-blocking `refresh_sales` tool (launches the local eBay scraper detached,
+  returns at once) and renders an "Updating Sales" status card with a ← Watchlist back link (step 4,
+  built; pending on-simulator verification). The **12-book limit** lives in the agent prompt.
 - Catalog widgets self-style with explicit `InkEquity.*` styles (no `fontFamily`); `Text` merges
   them over the theme's `DefaultTextStyle`, so the theme's Inter flows in. The chart axis labels are
   drawn via `TextPainter` (bypassing `DefaultTextStyle`) so they set `fontFamily` explicitly.
